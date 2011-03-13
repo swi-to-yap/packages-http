@@ -41,7 +41,11 @@
 	    cgi_statistics/1		% ?Statistics
 	  ]).
 
+:- use_module(library(shlib)).
+
 :- use_foreign_library(foreign(http_stream)).
+
+:- meta_predicate(cgi_open(+,-,2,+)).
 
 /** <module> HTTP Streams
 
