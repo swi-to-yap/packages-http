@@ -253,7 +253,7 @@ thread_cputime(CPU) :-
 	thread_statistics(Me, cputime, CPU).
 :- else.
 thread_cputime(CPU) :-
-	statistics(cputime, CPU).
+	statistics(cputime, CPU._).
 :- endif.
 
 
