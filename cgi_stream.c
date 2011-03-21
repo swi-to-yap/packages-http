@@ -26,7 +26,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#ifndef __MINGW32__
 #include <pthread.h>
+#endif
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 The task of cgi_stream.c is to interface between the actual wrapper code
@@ -102,11 +104,17 @@ static predicate_t PREDICATE_call3;	/* Goal, Event, Handle */
 		 /*******************************
 		 *	       THREADS		*
 		 *******************************/
+#ifdef __MINGW32__
+static int mutex = 0;
 
+#define LOCK()   
+#define UNLOCK() 
+#else
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define LOCK()   pthread_mutex_lock(&mutex)
 #define UNLOCK() pthread_mutex_unlock(&mutex)
+#endif
 
 
 		 /*******************************
