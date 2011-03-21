@@ -20,9 +20,9 @@ all:		$(SOLIBS)
 
 
 http_stream.@SO@:	$(STREAMOBJ)
-		$(LD) $(LDFLAGS) -o $@ $(STREAMOBJ) @LIBS@
+		$(LD) $(LDSOFLAGS) -o $@ $(STREAMOBJ) $(LIBS)
 json.@SO@:	$(JSONOBJ)
-		$(LD) $(LDFLAGS) -o $@ $(JSONOBJ) @LIBS@
+		$(LD) $(LDSOFLAGS) -o $@ $(JSONOBJ) $(LIBS)
 
 http_stream.o:	$(addprefix $(srcdir)/, http_error.c http_chunked.c cgi_stream.c stream_range.c)
 
