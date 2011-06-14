@@ -2,10 +2,11 @@
 
     Part of SWI-Prolog
 
-    Author:        Jan Wielemaker
-    E-mail:        wielemak@science.uva.nl
+    Author:        Jan Wielemaker, Matt Lilley
+    E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2006, University of Amsterdam
+    Copyright (C): 2006-2011, University of Amsterdam
+			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -37,6 +38,7 @@
 	    http_in_session/1,		% -SessionId
 	    http_current_session/2,	% ?SessionId, ?Data
 	    http_close_session/1,	% +SessionId
+            http_open_session/2,	% -SessionId, +Options
 
 	    http_session_asserta/1,	% +Data
 	    http_session_assert/1,	% +Data
@@ -45,6 +47,7 @@
 	    http_session_data/1		% ?Data
 	  ]).
 :- use_module(http_wrapper).
+:- use_module(http_stream).
 :- use_module(library(error)).
 :- use_module(library(debug)).
 :- use_module(library(socket)).
@@ -55,10 +58,17 @@
 
 This library defines session management based   on HTTP cookies. Session
 management is enabled simply by  loading   this  module.  Details can be
-modified using http_set_session_options/1.  If   sessions  are  enabled,
-http_session_id/1 produces the current session and http_session_assert/1
-and  friends  maintain  data  about  the  session.  If  the  session  is
-reclaimed, all associated data is reclaimed too.
+modified  using  http_set_session_options/1.  By  default,  this  module
+creates a session whenever a request  is   processes  that is inside the
+hierarchy  defined  for   session   handling    (see   path   option  in
+http_set_session_options/1. Automatic creation  of  a   session  can  be
+stopped    using    the    option    create(noauto).    The    predicate
+http_open_session/2 must be used to  create   a  session  if =noauto= is
+enabled. Sessions can be closed using http_close_session/1.
+
+If a session is active, http_in_session/1   returns  the current session
+and http_session_assert/1 and friends maintain   data about the session.
+If the session is reclaimed, all associated data is reclaimed too.
 
 Begin and end of sessions can be monitored using library(broadcast). The
 broadcasted messages are:
@@ -90,12 +100,16 @@ session_setting(timeout(600)).		% timeout in seconds
 session_setting(cookie('swipl_session')).
 session_setting(path(/)).
 session_setting(enabled(true)).
+session_setting(create(auto)).
+session_setting(proxy_enabled(false)).
 
 session_option(timeout, integer).
 session_option(cookie, atom).
 session_option(path, atom).
+session_option(create, oneof([auto,noauto])).
 session_option(route, atom).
 session_option(enabled, boolean).
+session_option(proxy_enabled, boolean).
 
 %%	http_set_session_options(+Options) is det.
 %
@@ -121,6 +135,19 @@ session_option(enabled, boolean).
 %		* enabled(+Boolean)
 %		Enable/disable session management.  Sesion management
 %		is enabled by default after loading this file.
+%
+%		* create(+Atom)
+%		Defines when a session is created. This is one of =auto=
+%		(default), which creates a session if there is a request
+%		whose path matches the defined session path or =noauto=,
+%		in which cases sessions are only created by calling
+%		http_open_session/2 explicitely.
+%
+%		* proxy_enabled(+Boolean)
+%		Enable/disable proxy session management. Proxy session
+%		management associates the _originating_ IP address of
+%		the client to the session rather than the _proxy_ IP
+%		address. Default is false.
 
 http_set_session_options([]).
 http_set_session_options([H|T]) :-
@@ -186,6 +213,10 @@ http_in_session(SessionID) :-
 %	This must be called first when handling a request that wishes to
 %	do session management, after which the possibly modified request
 %	must be used for further processing.
+%
+%	This predicate creates a  session  if   the  setting  create  is
+%	=auto=.  If  create  is  =noauto=,  the  application  must  call
+%	http_open_session/1 to create a session.
 
 http_session(Request, Request, SessionID) :-
 	memberchk(session(SessionID0), Request), !,
@@ -200,17 +231,57 @@ http_session(Request0, Request, SessionID) :-
 	Request = [session(SessionID)|Request0],
 	b_setval(http_session_id, SessionID).
 http_session(Request0, Request, SessionID) :-
+        session_setting(create(auto)),
 	session_setting(path(Path)),
 	memberchk(path(ReqPath), Request0),
 	sub_atom(ReqPath, 0, _, _, Path), !,
-	http_gc_sessions,		% GC dead sessions
+	create_session(Request0, Request, SessionID).
+
+create_session(Request0, Request, SessionID) :-
+	http_gc_sessions,
 	gen_cookie(SessionID),
 	session_setting(cookie(Cookie)),
-	format('Set-Cookie: ~w=~w; path=~w~n', [Cookie, SessionID, Path]),
+	session_setting(path(Path)),
+	format('Set-Cookie: ~w=~w; path=~w\r\n', [Cookie, SessionID, Path]),
 	Request = [session(SessionID)|Request0],
 	peer(Request0, Peer),
 	open_session(SessionID, Peer),
 	b_setval(http_session_id, SessionID).
+
+
+%%	http_open_session(-SessionID, +Options) is det.
+%
+%	Establish a new session.  This is normally used if the create
+%	option is set to =noauto=.  Options:
+%
+%	  * renew(+Boolean)
+%	  If =true= (default =false=) and the current request is part
+%	  of a session, generate a new session-id.  By default, this
+%	  predicate returns the current session as obtained with
+%	  http_in_session/1.
+%
+%	@see	http_set_session_options/1 to control the =create= option.
+%	@see	http_close_session/1 for closing the session.
+%	@error	permission_error(open, http_session, CGI) if this call
+%		is used after closing the CGI header.
+
+http_open_session(SessionID, Options) :-
+	http_in_session(SessionID0),
+	\+ option(renew(true), Options, false), !,
+	SessionID = SessionID0.
+http_open_session(SessionID, _Options) :-
+	(   in_header_state
+	->  true
+	;   current_output(CGI),
+	    permission_error(open, http_session, CGI)
+	),
+	(   http_in_session(ActiveSession)
+	->  http_close_session(ActiveSession, false)
+	;   true
+	),
+	http_current_request(Request),
+	create_session(Request, _, SessionID).
+
 
 :- multifile
 	http:request_expansion/2.
@@ -219,13 +290,16 @@ http:request_expansion(Request0, Request) :-
 	session_setting(enabled(true)),
 	http_session(Request0, Request, _SessionID).
 
-%%	peer(+Request, -Peer)
+%%	peer(+Request, -Peer) is det.
 %
 %	Find peer for current request. If   unknown we leave it unbound.
 %	Alternatively we should treat this as an error.
 
 peer(Request, Peer) :-
-	(   memberchk(peer(Peer), Request)
+	(   session_setting(proxy_enabled(true)),
+	    memberchk(x_forwarded_for(Peer), Request)
+	->  true
+	;   memberchk(peer(Peer), Request)
 	->  true
 	;   true
 	).
@@ -242,7 +316,7 @@ open_session(SessionID, Peer) :-
 	broadcast(http_session(begin(SessionID, Peer))).
 
 
-%%	valid_session_id(+SessionID, +Peer)
+%%	valid_session_id(+SessionID, +Peer) is semidet.
 %
 %	Check if this sessionID is known. If so, check the idle time and
 %	update the last_used for this session.
@@ -315,6 +389,8 @@ http_session_retractall(Data) :-
 %
 %	True if Data is associated using http_session_assert/1 to the
 %	current HTTP session.
+%
+%	@error	existence_error(http_session,_)
 
 http_session_data(Data) :-
 	http_session_id(SessionId),
@@ -381,15 +457,27 @@ http_current_session(SessionID, Data) :-
 %	Succeed without any effect if  SessionID   does  not refer to an
 %	active session.
 %
+%	If http_close_session/1 is called from   a  handler operating in
+%	the current session  and  the  CGI   stream  is  still  in state
+%	=header=, this predicate emits a   =|Set-Cookie|=  to expire the
+%	cookie.
+%
 %	@error	type_error(atom, SessionID)
 %	@see	listen/2 for acting upon closed sessions
 
 http_close_session(SessionId) :-
+	http_close_session(SessionId, true).
+
+http_close_session(SessionId, Expire) :-
 	must_be(atom, SessionId),
 	(   current_session(SessionId, Peer),
 	    (	b_setval(http_session_id, SessionId),
 		broadcast(http_session(end(SessionId, Peer))),
 		fail
+	    ;	true
+	    ),
+	    (	Expire == true
+	    ->	expire_session_cookie(SessionId)
 	    ;	true
 	    ),
 	    retractall(current_session(SessionId, _)),
@@ -398,6 +486,29 @@ http_close_session(SessionId) :-
 	    fail
 	;   true
 	).
+
+
+%%	expire_session_cookie(+SessionId) is det.
+%
+%	Emit a request to delete a session  cookie. This is only done if
+%	http_close_session/1 is called from a   handler executing inside
+%	the session and the handler is still in `header mode'.
+
+expire_session_cookie(SessionId) :-
+	http_in_session(SessionId),
+	in_header_state,
+	session_setting(cookie(Cookie)),
+	session_setting(path(Path)), !,
+	format('Set-Cookie: ~w=; \c
+		expires=Tue, 01-Jan-1970 00:00:00 GMT; \c
+		path=~w\r\n',
+	       [Cookie, Path]).
+expire_session_cookie(_).
+
+in_header_state :-
+	current_output(CGI),
+	cgi_property(CGI, state(header)), !.
+
 
 %	http_gc_sessions/0
 %
@@ -474,23 +585,14 @@ route_no_cache(Route) :-
 	;   Route = Host
 	).
 
-
-%%	random_4(-R1,-R2,-R3,-R4) is det.
+:- if(\+current_prolog_flag(windows, true)).
+%%	urandom(-Handle) is semidet.
 %
-%	Generate 4 2-byte random  numbers.   Uses  =|/dev/urandom|= when
-%	available to make prediction of the session IDs hard.
-
-random_4(R1,R2,R3,R4) :-
-	urandom(In), !,
-	get_pair(In, R1),
-	get_pair(In, R2),
-	get_pair(In, R3),
-	get_pair(In, R4).
-random_4(R1,R2,R3,R4) :-
-	R1 is random(65536),
-	R2 is random(65536),
-	R3 is random(65536),
-	R4 is random(65536).
+%	Handle is a stream-handle  for   /dev/urandom.  Originally, this
+%	simply tried to open /dev/urandom, failing   if this device does
+%	not exist. It turns out  that   trying  to open /dev/urandom can
+%	block indefinitely on  some  Windows   installations,  so  we no
+%	longer try this on Windows.
 
 :- dynamic
 	urandom_handle/1.
@@ -510,3 +612,23 @@ get_pair(In, Value) :-
 	get_byte(In, B1),
 	get_byte(In, B2),
 	Value is B1<<8+B2.
+:- endif.
+
+%%	random_4(-R1,-R2,-R3,-R4) is det.
+%
+%	Generate 4 2-byte random  numbers.   Uses  =|/dev/urandom|= when
+%	available to make prediction of the session IDs hard.
+
+:- if(current_predicate(urandom/1)).
+random_4(R1,R2,R3,R4) :-
+	urandom(In), !,
+	get_pair(In, R1),
+	get_pair(In, R2),
+	get_pair(In, R3),
+	get_pair(In, R4).
+:- endif.
+random_4(R1,R2,R3,R4) :-
+	R1 is random(65536),
+	R2 is random(65536),
+	R3 is random(65536),
+	R4 is random(65536).

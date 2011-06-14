@@ -44,6 +44,7 @@
 :- use_module(library(shlib)).
 
 :- use_foreign_library(foreign(http_stream)).
+:- public http_stream_debug/1.		% set debug level
 
 :- meta_predicate(cgi_open(+,-,2,+)).
 

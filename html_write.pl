@@ -655,7 +655,7 @@ search_parameter(Term) -->
 %	Used for multi-valued attributes, such as class-lists.  E.g.,
 %
 %	  ==
-%	  	body(class([c1, c2]), Body)
+%		body(class([c1, c2]), Body)
 %	  ==
 %
 %	  Emits =|<body class="c1 c2"> ...|=
@@ -916,14 +916,14 @@ post_close(_) -->
 %			close-tag or =empty= to indicate the element has
 %			no content model.
 %
-% 	@tbd	Complete table
+%	@tbd	Complete table
 
 :- multifile
 	layout/3.
 
 layout(table,	   2-1,	1-2).
 layout(blockquote, 2-1,	1-2).
-layout(pre, 	   2-1,	1-2).
+layout(pre,	   2-1,	1-2).
 layout(center,	   2-1,	1-2).
 layout(dl,	   2-1,	1-2).
 layout(ul,	   1-1,	1-1).
@@ -1099,7 +1099,13 @@ reply_html_page(Style, Head, Body) :-
 %	rule takes HTML content as  argument.   It  has  two effects. It
 %	emits  the  appropriate  meta_predicate/1    and  instructs  the
 %	built-in editor (PceEmacs) to provide   proper colouring for the
-%	arguments.
+%	arguments.  The  arguments  in  Head  are    the   same  as  for
+%	meta_predicate or can be constant =html=.  For example:
+%
+%	  ==
+%	  :- html_meta
+%		page(html,html,?,?).
+%	  ==
 
 html_meta(Spec) :-
 	throw(error(context_error(nodirective, html_meta(Spec)), _)).
@@ -1110,7 +1116,7 @@ html_meta_decls(Var, _, _) :-
 html_meta_decls((A,B), (MA,MB), [MH|T]) :- !,
 	html_meta_decl(A, MA, MH),
 	html_meta_decls(B, MB, T).
-html_meta_decls(A, MA, MH) :-
+html_meta_decls(A, MA, [MH]) :-
 	html_meta_decl(A, MA, MH).
 
 html_meta_decl(Head, MetaHead,
@@ -1141,6 +1147,9 @@ html_meta_colours(Head, Goal, built_in-Colours) :-
 
 meta_colours(html, HTML, Colours) :- !,
 	html_colours(HTML, Colours).
+meta_colours(I, _, Colours) :-
+	integer(I), I>=0, !,
+	Colours = meta(I).
 meta_colours(_, _, classify).
 
 html_meta_called(Head, Goal, Called) :-
@@ -1152,6 +1161,11 @@ meta_called([], [], Called, Called).
 meta_called([html|MT], [A|AT], Called, Tail) :- !,
 	phrase(called_by(A), Called, Tail1),
 	meta_called(MT, AT, Tail1, Tail).
+meta_called([0|MT], [A|AT], [A|CT0], CT) :- !,
+	meta_called(MT, AT, CT0, CT).
+meta_called([I|MT], [A|AT], [A+I|CT0], CT) :-
+	integer(I), I>0, !,
+	meta_called(MT, AT, CT0, CT).
 meta_called([_|MT], [_|AT], Called, Tail) :- !,
 	meta_called(MT, AT, Called, Tail).
 
@@ -1340,6 +1354,14 @@ called_by(Term, M) -->
 	called_by(Args, M).
 called_by(_, _) -->
 	[].
+
+:- multifile
+	prolog:hook/1.
+
+prolog:hook(body(_,_,_)).
+prolog:hook(body(_,_,_,_)).
+prolog:hook(head(_,_,_)).
+prolog:hook(head(_,_,_,_)).
 
 
 		 /*******************************

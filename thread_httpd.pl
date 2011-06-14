@@ -70,7 +70,6 @@ for details.
 	http_spawn(0, +).
 
 :- dynamic
-	port_option/2,			% Port, Option
 	current_server/5,		% Port, Goal, Thread, Queue, StartTime
 	queue_worker/2,			% Queue, ThreadID
 	queue_options/2.		% Queue, Options
@@ -87,8 +86,8 @@ for details.
 %	Create a server at Port that calls Goal for each parsed request.
 %	Options provide a list of options. Defined options are
 %
-%	| port(?Port)	     | - 	| Port to listen to		      |
-%	| workers(N)	     | 5 	| Define the number of worker threads |
+%	| port(?Port)	     | -	| Port to listen to		      |
+%	| workers(N)	     | 5	| Define the number of worker threads |
 %	| timeout(S)	     | 60	| Max inactivity for reading request  |
 %	| keep_alive_timeout | 2	| Drop Keep-Alive connection timeout  |
 %	| local(KBytes)	     | <CommandLine> |				      |
@@ -99,7 +98,6 @@ http_server(Goal, Options) :-
 	strip_module(Goal, Module, G),
 	select_option(port(Port), Options, Options1), !,
 	make_socket(Port, Options1, Options2),
-	set_port_options(Port, Options2),
 	create_workers(Options2),
 	create_server(Module:G, Port, Options2).
 http_server(_Goal, _Options) :-
@@ -118,38 +116,42 @@ make_socket(Port, Options0, Options) :-
 	tcp_setopt(Socket, reuseaddr),
 	tcp_bind(Socket, Port),
 	tcp_listen(Socket, 5),
-	atom_concat('httpd@', Port, Queue),
+	make_addr_atom('httpd@', Port, Queue),
 	Options = [ queue(Queue),
 		    tcp_socket(Socket)
 		  | Options0
 		  ].
 
+%%	make_addr_atom(+Prefix, +Address, -Atom) is det.
+%
+%	Create an atom that identifies  the   server's  queue and thread
+%	resources.
+
+make_addr_atom(Prefix, Address, Atom) :-
+	phrase(address_parts(Address), Parts),
+	atomic_list_concat([Prefix|Parts], Atom).
+
+address_parts(Atomic) -->
+	{ atomic(Atomic) }, !,
+	[Atomic].
+address_parts(Host:Port) --> !,
+	address_parts(Host), [:], address_parts(Port).
+address_parts(ip(A,B,C,D)) --> !,
+	[ A, '.', B, '.', C, '.', D ].
+
+%%	create_server(:Goal, +Address, +Options) is det.
+%
+%	Create the main server thread that runs accept_server/2 to
+%	listen to new requests.
+
 create_server(Goal, Port, Options) :-
 	get_time(StartTime),
 	memberchk(queue(Queue), Options),
-	atom_concat('http@', Port, Alias),
+	make_addr_atom('http@', Port, Alias),
 	thread_create(accept_server(Goal, Options), _,
 		      [ alias(Alias)
 		      ]),
 	assert(current_server(Port, Goal, Alias, Queue, StartTime)).
-
-
-%%	set_port_options(+Port, +Options) is det.
-%
-%	Register Options for the HTTP server at Port.
-
-set_port_options(Port, Options) :-
-	retractall(port_option(Port, _)),
-	assert_port_options(Options, Port).
-
-assert_port_options([], _).
-assert_port_options([Name=Value|T], Port) :- !,
-	Opt =.. [Name,Value],
-	assert(port_option(Port, Opt)),
-	assert_port_options(T, Port).
-assert_port_options([Opt|T], Port) :- !,
-	assert(port_option(Port, Opt)),
-	assert_port_options(T, Port).
 
 
 %%	http_current_server(:Goal, ?Port) is nondet.
@@ -437,10 +439,30 @@ check_keep_alife_connection(In, TMO, Peer, In, Out) :-
 done_worker :-
 	thread_self(Self),
 	thread_property(Self, status(Status)),
-	retract(queue_worker(_Queue, Self)),
-	print_message(informational,
-		      httpd_stopped_worker(Self, Status)).
+	retract(queue_worker(Queue, Self)),
+	(   catch(recreate_worker(Status, Queue), _, fail)
+	->  thread_detach(Self),
+	    print_message(informational,
+			  httpd_restarted_worker(Self))
+	;   print_message(informational,
+			  httpd_stopped_worker(Self, Status))
+	).
 
+%%	recreate_worker(+Status, +Queue) is semidet.
+%
+%	Deal with the possibility that  threads are, during development,
+%	killed with abort/0. We  recreate  the   worker  to  avoid  that
+%	eventually we run out of workers.  If   we  are aborted due to a
+%	halt/0 call, thread_create/3 will raise a permission error.
+
+recreate_worker(exception(Error), Queue) :-
+	recreate_on_error(Error),
+	queue_options(Queue, Options),
+	atom_concat(Queue, '_', AliasBase),
+	create_workers(1, 1, Queue, AliasBase, Options).
+
+recreate_on_error('$aborted').
+recreate_on_error(time_limit_exceeded).
 
 %	thread_httpd:message_level(+Exception, -Level)
 %
@@ -603,6 +625,8 @@ create_pool(Pool) :-
 
 prolog:message(httpd_stopped_worker(Self, Status)) -->
 	[ 'Stopped worker ~p: ~p'-[Self, Status] ].
+prolog:message(httpd_restarted_worker(Self)) -->
+	[ 'Replaced aborted worker ~p'-[Self] ].
 prolog:message(httpd(created_pool(Pool))) -->
 	[ 'Created thread-pool ~p of size 10'-[Pool], nl,
 	  'Create this pool at startup-time or define the hook ', nl,
