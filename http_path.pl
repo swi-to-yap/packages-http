@@ -229,7 +229,7 @@ clean_segments(T0, T) :-
 clean_parent_segments([], []).
 clean_parent_segments([..|T0], T) :- !,
 	clean_parent_segments(T0, T).
-clean_parent_segments([_,..|T0], T) :- !,
+clean_parent_segments([_,(..)|T0], T) :- !,
 	clean_parent_segments(T0, T).
 clean_parent_segments([H|T0], [H|T]) :-
 	clean_parent_segments(T0, T).
