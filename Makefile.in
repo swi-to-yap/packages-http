@@ -37,7 +37,7 @@ install:	$(SOLIBS) $(addprefix $(srcdir)/, $(LIBPL))
 		(cd $(srcdir) && $(INSTALL_DATA) README $(DESTDIR)$(HTTPDIR))
 		(cd $(srcdir) && $(INSTALL_DATA) web/icons/*.png $(DESTDIR)$(HTTPDIR)/web/icons)
 		(cd $(srcdir) && $(INSTALL_DATA) web/css/*.css $(DESTDIR)$(HTTPDIR)/web/css)
-		(cd $(srcdir) && $(PL) -f none -g true -t "make_library_index('$(DESTDIR)$(LIBDIR)')" )
+		#(cd $(srcdir) && $(PL) -f none -g true -t "make_library_index('$(DESTDIR)$(LIBDIR)')" )
 		(cd $(srcdir) && $(PL) -f none -g make -t halt )
 
 ln-install:	$(LIBPL)
