@@ -75,7 +75,7 @@ SUBTEX=		post.tex json.tex httplog.tex httppath.tex htmlhead.tex \
 		httpsession.tex httpdispatch.tex httpdirindex.tex httppwp.tex \
 		httpopen.tex httphost.tex httpopenid.tex jswrite.tex
 
-json.tex:	json.pl json_convert.pl http_json.pl
+json.tex:	$(srcdir)/json.pl $(srcdir)/json_convert.pl $(srcdir)/http_json.pl
 
 .txt.tex:
 		$(PUBLICPL) -q -s txttotex.pl -g txttotex,halt -t 'halt(1)' -- $*.txt
