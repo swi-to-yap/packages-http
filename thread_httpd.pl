@@ -19,7 +19,7 @@
 
     You should have received a copy of the GNU Lesser General Public
     License along with this library; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
     As a special exception, if you link this library with other files,
     compiled with a Free Software compiler, to produce an executable, this
@@ -385,14 +385,19 @@ open_client(requeue(In, Out, Goal, ClOpts),
 	memberchk(peer(Peer), ClOpts),
 	option(keep_alive_timeout(KeepAliveTMO), Opts, 2),
 	check_keep_alife_connection(In, KeepAliveTMO, Peer, In, Out).
-open_client(Message, Queue, Goal, In, Out, _Opts,
-	    [ pool(client(Queue, Goal, In, Out))
+open_client(Message, Queue, Goal, In, Out, Opts,
+	    [ pool(client(Queue, Goal, In, Out)),
+	      timeout(Timeout)
 	    | Options
 	    ]) :-
 	catch(open_client(Message, Goal, In, Out, Options),
 	      E, report_error(E)),
-	memberchk(peer(Peer), Options),
-	debug(http(connection), 'Opened connection from ~p', [Peer]).
+	option(timeout(Timeout), Opts, 60),
+	(   debugging(http(connection))
+	->  memberchk(peer(Peer), Options),
+	    debug(http(connection), 'Opened connection from ~p', [Peer])
+	;   true
+	).
 
 
 open_client(Message, Goal, In, Out, Options) :-

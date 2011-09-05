@@ -19,7 +19,7 @@
 
     You should have received a copy of the GNU General Public
     License along with this library; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
     As a special exception, if you link this library with other files,
     compiled with a Free Software compiler, to produce an executable, this
@@ -114,7 +114,8 @@ is_json_type(ContentType) :-
 strip_utf8(ContentType, Plain) :-
 	sub_atom(ContentType, B, _, A, ;),
 	sub_atom(ContentType, _, A, 0, Ext),
-	normalize_space(atom('charset=UTF-8'), Ext), !,
+	normalize_space(atom(Charset), Ext),
+	downcase_atom(Charset, 'charset=utf-8'), !,
 	sub_atom(ContentType, 0, B, _, CT),
 	normalize_space(atom(Plain), CT).
 strip_utf8(ContentType, ContentType).

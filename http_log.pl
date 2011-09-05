@@ -17,7 +17,7 @@
 
     You should have received a copy of the GNU General Public
     License along with this library; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
     As a special exception, if you link this library with other files,
     compiled with a Free Software compiler, to produce an executable, this
@@ -35,7 +35,7 @@
 :- use_module(library(settings)).
 :- use_module(library(broadcast)).
 
-:- setting(http:logfile, atom, 'httpd.log',
+:- setting(http:logfile, callable, 'httpd.log',
 	   'File in which to log HTTP requests').
 
 /** <module> HTTP Logging module
@@ -88,8 +88,9 @@ http_log_stream(Stream) :-
 	log_stream(Stream), !,
 	Stream \== [].
 http_log_stream(Stream) :-
-	setting(http:logfile, File),
-	File \== '', !,
+	setting(http:logfile, Term),
+	Term \== '', !,
+	absolute_file_name(Term, File, [access(append)]),
 	with_mutex(http_log,
 		   (   open(File, append, Stream,
 			    [ close_on_abort(false),

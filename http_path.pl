@@ -1,9 +1,10 @@
 /*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@uva.nl
+    E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2008, University of Amsterdam
+    Copyright (C): 2008-2011, University of Amsterdam
+			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -17,7 +18,7 @@
 
     You should have received a copy of the GNU General Public
     License along with this library; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
     As a special exception, if you link this library with other files,
     compiled with a Free Software compiler, to produce an executable, this
@@ -28,7 +29,8 @@
 */
 
 :- module(http_path,
-	  [ http_absolute_location/3	% +Spec, -Path, +Options
+	  [ http_absolute_location/3,	% +Spec, -Path, +Options
+	    http_clean_location_cache/0
 	  ]).
 :- use_module(library(lists)).
 :- use_module(library(error)).
@@ -275,11 +277,18 @@ prolog:message(http(ambiguous_location(Spec, Paths))) -->
 		 *	  CACHE CLEANUP		*
 		 *******************************/
 
-clean_location_cache :-
+%%	http_clean_location_cache
+%
+%	HTTP locations resolved  through   http_absolute_location/3  are
+%	cached.  This  predicate  wipes   the    cache.   The  cache  is
+%	automatically wiped by make/0 and if  the setting http:prefix is
+%	changed.
+
+http_clean_location_cache :-
 	retractall(location_cache(_,_,_)).
 
 :- listen(settings(changed(http:prefix, _, _)),
-	  clean_location_cache).
+	  http_clean_location_cache).
 
 :- multifile
 	user:message_hook/3.
@@ -288,5 +297,5 @@ clean_location_cache :-
 
 user:message_hook(make(done(Reload)), _Level, _Lines) :-
 	Reload \== [],
-	clean_location_cache,
+	http_clean_location_cache,
 	fail.
