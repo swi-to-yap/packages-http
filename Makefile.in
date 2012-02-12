@@ -4,125 +4,68 @@
 # Copyright: GPL (see COPYING or www.gnu.org
 ################################################################
 
-PACKAGE=http
+PACKAGE=zlib
+DOC=zlib
 include ../Makefile.defs
 
-HTTPDIR=$(PLLIBDIR)/http
-EXDIR=$(PKGEXDIR)/http
+LIBPL=		@ZLIB_PLTARGETS@
+TARGETS=	@ZLIB_TARGETS@
 
-include $(srcdir)/common.mk
+ZOBJ=		zlib4pl.o
 
-STREAMOBJ=	http_stream.o
-JSONOBJ=	json.o
-SOLIBS=		http_stream.@SO@ json.@SO@
+all:		$(TARGETS)
 
-all:		$(SOLIBS)
+nolib::
+		@echo "WARNING: Could not find zlib library; skipped"
 
+zlib4pl.@SO@:	$(ZOBJ)
+		$(LD) $(LDSOFLAGS) -o $@ $(ZOBJ) @LIBS@ @ZLIBS@
 
-http_stream.@SO@:	$(STREAMOBJ)
-		$(LD) $(LDSOFLAGS) -o $@ $(STREAMOBJ) $(LIBS)
-json.@SO@:	$(JSONOBJ)
-		$(LD) $(LDSOFLAGS) -o $@ $(JSONOBJ) $(LIBS)
-
-http_stream.o:	$(addprefix $(srcdir)/, http_error.c http_chunked.c cgi_stream.c stream_range.c)
-
-install:	$(SOLIBS) $(addprefix $(srcdir)/, $(LIBPL))
+install:	$(TARGETS) $(addprefix $(srcdir)/, $(LIBPL))
 		mkdir -p $(DESTDIR)$(SOLIBDIR)
-		rm -f $(DESTDIR)$(SOLIBDIR)/http_chunked.@SO@
-		$(INSTALL_PROGRAM) $(SOLIBS) $(SOLIBDIR)
-		mkdir -p $(DESTDIR)$(HTTPDIR)
-		mkdir -p $(DESTDIR)$(HTTPDIR)/web/icons
-		mkdir -p $(DESTDIR)$(HTTPDIR)/web/css
-		(cd $(srcdir) && $(INSTALL_DATA) $(LIBPL) $(DESTDIR)$(HTTPDIR))
-		(cd $(srcdir) && $(INSTALL_DATA) README $(DESTDIR)$(HTTPDIR))
-		(cd $(srcdir) && $(INSTALL_DATA) web/icons/*.png $(DESTDIR)$(HTTPDIR)/web/icons)
-		(cd $(srcdir) && $(INSTALL_DATA) web/css/*.css $(DESTDIR)$(HTTPDIR)/web/css)
-		#(cd $(srcdir) && $(PL) -f none -g true -t "make_library_index('$(DESTDIR)$(LIBDIR)')" )
-		(cd $(srcdir) && $(PL) -f none -g make -t halt )
+		for f in $(TARGETS); do \
+		  $(INSTALL_PROGRAM) $$f $(DESTDIR)$(SOLIBDIR); \
+		done
+		mkdir -p $(DESTDIR)$(PLLIBDIR)
+		for f in $(LIBPL); do \
+		  $(INSTALL_DATA) $(srcdir)/$$f $(DESTDIR)$(PLLIBDIR); \
+		done
+		$(MKINDEX)
 
-ln-install:	$(LIBPL)
+ln-install::
 		$(MAKE) INSTALL_DATA="../ln-install" INSTALL_PROGRAM="../ln-install" install
 
 rpm-install:	install
 
-pdf-install:	install-examples
-		$(INSTALL_DATA) $(DOC).pdf $(DESTDIR)$(PKGDOCDIR)
+html-install::
+		mkdir -p $(DESTDIR)$(PKGDOC)
+		$(INSTALL) -m 644 $(DOC).html $(DESTDIR)$(PKGDOC)
 
-html-install:	install-examples
-		$(INSTALL_DATA) $(DOC).html $(srcdir)/httpserver.gif $(DESTDIR)$(PKGDOC)
-
-install-examples::
-		mkdir -p $(DESTDIR)$(EXDIR)
-		mkdir -p $(DESTDIR)$(EXDIR)/pwp
-		(cd $(srcdir)/examples && $(INSTALL_DATA) $(EXAMPLES) $(DESTDIR)$(EXDIR))
-		(cd $(srcdir)/examples/pwp && $(INSTALL_DATA) *.pwp *.pl $(DESTDIR)$(EXDIR)/pwp)
-		(cd $(srcdir)/examples && $(INSTALL_PROGRAM) $(EXAMPLEEXE) $(DESTDIR)$(EXDIR))
+pdf-install::
+		mkdir -p $(DESTDIR)$(PKGDOC)
+		$(INSTALL) -m 644 $(DOC).pdf $(DESTDIR)$(PKGDOC)
 
 uninstall::
-		(cd $(LIBDIR) && rm -f $(LIBPL))
-		$(PL) -f none -g make -t halt
+		(cd $(SOLIBDIR) && rm -f $(TARGETS))
+		(cd $(PLBASE)/library && rm -f $(LIBPL))
+		$(MKINDEX)
+
+################################################################
+# Testing
+################################################################
 
 check::
-		(cd $(srcdir) && $(PL) -q -f test_http.pl -g test_http,halt -t 'halt(1)' )
-		(cd $(srcdir) && $(PL) -q -f test_json.pl -g test_json,halt -t 'halt(1)' )
-		(cd $(srcdir) && $(PL) -q -f test_cgi_stream.pl -g true -t test_cgi_stream )
-
-################################################################
-# Documentation
-################################################################
-
-SUBTEX=		post.tex json.tex httplog.tex httppath.tex htmlhead.tex \
-		httpsession.tex httpdispatch.tex httpdirindex.tex httppwp.tex \
-		httpopen.tex httphost.tex httpopenid.tex jswrite.tex
-
-json.tex:	$(srcdir)/json.pl $(srcdir)/json_convert.pl $(srcdir)/http_json.pl
-
-.txt.tex:
-		$(PUBLICPL) -q -s txttotex.pl -g txttotex,halt -t 'halt(1)' -- $*.txt
-
-httplog.tex:	http_log.pl
-		$(PLTOTEX) --subsection 'library(http/http_log)'
-
-httphost.tex:	http_host.pl
-		$(PLTOTEX) --subsection 'library(http/http_host)'
-
-httppath.tex:	http_path.pl
-		$(PLTOTEX) --subsection 'library(http/http_path)'
-
-httpopen.tex:	http_open.pl
-		$(PLTOTEX) --subsection 'library(http/http_open)'
-
-htmlhead.tex:	html_head.pl
-		$(PLTOTEX) --subsection 'library(http/html_head)'
-
-httpsession.tex: http_session.pl
-		$(PLTOTEX) --subsection 'library(http/http_session)'
-
-httpdispatch.tex: http_dispatch.pl
-		$(PLTOTEX) --subsection 'library(http/http_dispatch)'
-
-httpopenid.tex:	http_openid.pl
-		$(PLTOTEX) --subsection 'library(http/http_openid)'
-
-httpdirindex.tex: http_dirindex.pl
-		$(PLTOTEX) --subsection 'library(http/http_dirindex)'
-
-httppwp.tex:	http_pwp.pl
-		$(PLTOTEX) --subsection 'library(http/http_pwp)'
-
-jswrite.tex:	js_write.pl
-		$(PLTOTEX) --subsection 'library(http/js_write)'
+		(cd $(srcdir) && $(PL) -q -f test_zlib.pl -g test_zlib,halt -t 'halt(1)' )
 
 ################################################################
 # Clean
 ################################################################
 
 clean:
-		rm -f $(STREAMOBJ) $(JSONOBJ)
-		rm -f *~ *% config.log
-		rm -f $(TEX) $(SUBTEX)
-		$(RUNTEX) --clean $(DOC)
-		rm -rf html
+		rm -f $(ZOBJ) *~ *.o *% a.out core config.log
 
 distclean:	clean
-		rm -f $(SOLIBS) config.cache config.status config.h Makefile
+		rm -f $(TARGETS) config.cache config.h config.status Makefile
+		rm -f $(DOC).aux $(DOC).log $(DOC).out $(DOC).toc
+		rm -rf html
+		rm -rf autom4te.cache
