@@ -5,8 +5,8 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2008-2010, University of Amsterdam
-			      Vu University Amsterdam
+    Copyright (C): 2008-2011, University of Amsterdam
+			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -100,6 +100,23 @@ resource. See also parse_time/2.
 :- meta_predicate
 	http_open(+,-,:).
 
+:- predicate_options(http_open/3, 3,
+		     [ authorization(compound),
+		       final_url(-atom),
+		       header(+atom, -atom),
+		       method(oneof([get,head,post])),
+		       size(-integer),
+		       status_code(-integer),
+		       timeout(number),
+		       post(any),		    % library(http/http_header)
+		       proxy(atom, integer),
+		       proxy_authorization(compound),
+		       request_header(any),
+		       user_agent(atom),
+		       pem_password_hook(callable), % if SSL is loaded
+		       cert_verify_hook(callable)   % if SSL is loaded
+		     ]).
+
 %%	user_agent(-Agent) is det.
 %
 %	Default value for =|User-Agent|=,  can   be  overruled using the
@@ -186,8 +203,21 @@ user_agent('SWI-Prolog <http://www.swi-prolog.org>').
 %	@param	URL is either an atom (url) or a list of _parts_.
 %		If this list is provided, it may contain the fields
 %		=scheme=, =user=, =password=, =host=, =port=, =path= and
-%		=search= (where the argument of the latter is a
-%		Name(Value) list).  Only =host= is mandatory.
+%		=search= (where the argument of the latter is a list of
+%		Name(Value) or Name=Value).  Only =host= is mandatory.
+%		The following example below opens the URL
+%		=|http://www.example.com/my/path?q=Hello%20World&lang=en|=.
+%		Note that values must *not* be quoted because the
+%		library inserts the required quites.
+%
+%		==
+%		http_open([ host('www.example.com'),
+%			    path('/my/path'),
+%			    search([ q='Hello world',
+%			             lang=en
+%				   ])
+%			  ])
+%		==
 %
 %	@error existence_error(url, Id)
 
@@ -214,7 +244,7 @@ http_open_parts(Parts, Stream, Options0) :-
 	open_socket(Host:ProxyPort, In, Out, Options),
 	parts_scheme(Parts, Scheme),
 	default_port(Scheme, DefPort),
-	option(port(Port), Parts, DefPort),
+	url_part(port(Port), Parts, DefPort),
 	host_and_port(Host, DefPort, Port, HostPort),
 	send_rec_header(Out, In, Stream, HostPort, RequestURI, Parts, Options),
 	return_final_url(Options).
@@ -222,7 +252,7 @@ http_open_parts(Parts, Stream, Options0) :-
 	memberchk(host(Host), Parts),
 	parts_scheme(Parts, Scheme),
 	default_port(Scheme, DefPort),
-	option(port(Port), Parts, DefPort),
+	url_part(port(Port), Parts, DefPort),
 	parts_request_uri(Parts, RequestURI),
 	Options = [visited(Parts)|Options0],
 	open_socket(Host:Port, SocketIn, SocketOut, Options),
@@ -710,8 +740,8 @@ authorization(URL, Authorization) :-
 add_authorization(_, Options, Options) :-
 	option(authorization(_), Options), !.
 add_authorization(Parts, Options0, Options) :-
-	option(user(User), Parts),
-	option(password(Passwd), Parts),
+	url_part(user(User), Parts),
+	url_part(password(Passwd), Parts),
 	Options = [authorization(basic(User,Passwd))|Options0].
 add_authorization(Parts, Options0, Options) :-
 	stored_authorization(_, _) ->	% quick test to avoid work
@@ -788,25 +818,25 @@ uri_request_uri(Components) -->
 %%	parts_authority(+Parts, -Authority) is semidet.
 
 parts_scheme(Parts, Scheme) :-
-	option(scheme(Scheme), Parts), !.
+	url_part(scheme(Scheme), Parts), !.
 parts_scheme(Parts, Scheme) :-		% compatibility with library(url)
-	option(protocol(Scheme), Parts), !.
+	url_part(protocol(Scheme), Parts), !.
 parts_scheme(_, http).
 
 parts_authority(Parts, Auth) :-
-	option(authority(Auth), Parts), !.
+	url_part(authority(Auth), Parts), !.
 parts_authority(Parts, Auth) :-
-	option(host(Host), Parts, _),
-	option(port(Port), Parts, _),
-	option(user(User), Parts, _),
-	option(password(Password), Parts, _),
+	url_part(host(Host), Parts, _),
+	url_part(port(Port), Parts, _),
+	url_part(user(User), Parts, _),
+	url_part(password(Password), Parts, _),
 	uri_authority_components(Auth,
 				 uri_authority(User, Password, Host, Port)).
 
 parts_request_uri(Parts, RequestURI) :-
 	memberchk(request_uri(RequestURI), Parts), !.
 parts_request_uri(Parts, RequestURI) :-
-	option(path(Path), Parts, /),
+	url_part(path(Path), Parts, /),
 	ignore(parts_search(Parts, Search)),
 	uri_data(path, Data, Path),
 	uri_data(search, Data, Search),
@@ -829,6 +859,20 @@ parts_uri(Parts, URI) :-
 	uri_data(scheme, Data, Scheme),
 	uri_data(authority, Data, Auth),
 	uri_components(URI, Data).
+
+url_part(Part, Parts) :-
+	Part =.. [Name,Value],
+	Gen =.. [Name,RawValue],
+	memberchk(Gen, Parts), !,
+	Value = RawValue.
+
+url_part(Part, Parts, Default) :-
+	Part =.. [Name,Value],
+	Gen =.. [Name,RawValue],
+	(   memberchk(Gen, Parts)
+	->  Value = RawValue
+	;   Value = Default
+	).
 
 
 		 /*******************************

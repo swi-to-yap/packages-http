@@ -6,9 +6,9 @@
 \makeindex
 
 \onefile
-\htmloutput{html}				% Output directory
-\htmlmainfile{index}				% Main document file
-\bodycolor{white}				% Page colour
+\htmloutput{.}				% Output directory
+\htmlmainfile{http}			% Main document file
+\bodycolor{white}			% Page colour
 \sloppy
 
 \renewcommand{\runningtitle}{SWI-Prolog HTTP support}
@@ -117,10 +117,12 @@ Send authorization to the proxy.  Otherwise the same as the
 \const{authorization} option.
 
 	\termitem{timeout}{+Timeout}
-If provided, set a timeout on the stream using set_stream/2.  With this
-option if no new data arrives within \arg{Timeout} seconds the
-stream raises an exception. Default is to wait forever
-(\const{infinite}).
+If provided, set a timeout on the stream using set_stream/2. With this
+option if no new data arrives within \arg{Timeout} seconds the stream
+raises an exception. This option also affects data being written by the
+server: if the client does not process the next block of data (4096
+bytes using the default setup) within \arg{Timeout}, the connection
+is terminated.  Default is to wait forever (\const{infinite}).
 
 	\termitem{user_agent}{+Agent}
 Defines the value of the \const{User-Agent} field of the HTTP header.
@@ -393,6 +395,7 @@ last time.
 
 \input{httpdispatch.tex}
 \input{httpdirindex.tex}
+\input{httpfiles.tex}
 \input{httpsession.tex}
 
 
@@ -1097,7 +1100,7 @@ This approach has several advantages:
           machine.  We do not need a machine though and we only need
 	  access to the Apache configuration.
     \item As Apache is doing the front-line service, the Prolog server
-    	  is normally protected from malformed HTTP requests that could
+	  is normally protected from malformed HTTP requests that could
 	  result in denial of service or otherwise compromise the
 	  server.  In addition, Apache can provide encodings such as
 	  compression to the outside world.
@@ -1269,7 +1272,7 @@ Generate a ``302 Moved Temporary'' page with the given target
 	\termitem{see_other}{+URL}
 Generate a ``303 See Other'' page with the given target \arg{URL}.
 
- 	\termitem{not_found}{+URL}
+	\termitem{not_found}{+URL}
 Generate a ``404 Not Found'' page.
 
         \termitem{forbidden}{+URL}

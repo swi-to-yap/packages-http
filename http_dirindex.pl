@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2009, VU University Amsterdam
+    Copyright (C): 2009-2011, VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -35,8 +35,14 @@
 :- use_module(library(http/http_dispatch)).
 :- use_module(library(http/http_server_files)).
 :- use_module(library(http/html_head)).
+:- use_module(library(http/mimetype)).
 :- use_module(library(apply)).
 :- use_module(library(option)).
+
+:- predicate_options(http_reply_dirindex/3, 2,
+		     [ title(any),
+		       pass_to(http_dispatch:http_safe_file/2, 2)
+		     ]).
 
 /** <module> HTTP directory listings
 
@@ -138,12 +144,13 @@ dir_row(Dir, OE) -->
 
 file_row(File, OE) -->
 	{ file_base_name(File, Name),
-	  file_name_extension(_, Ext, Name),
-	  file_type_icon(Ext, IconName)
+	  file_mime_type(File, MimeType),
+	  mime_type_icon(MimeType, IconName),
+	  uri_encoded(path, Name, Ref)
 	},
 	html(tr(class(OE),
 		[ \icon_cell(IconName, '[FILE]'),
-		  \name_cell(Name, Name),
+		  \name_cell(Ref, Name),
 		  \modified_cell(File),
 		  td(class(size), \size(File))
 		])).
@@ -169,26 +176,37 @@ size(Name) -->
 	},
 	html('~D'-[Size]).
 
-%%	file_type_icon(+Extension, -Icon) is det.
+%%	mime_type_icon(+MimeType, -Icon) is det.
 %
 %	Determine the icon that is used  to   show  a  file of the given
 %	extension. This predicate can  be   hooked  using  the multifile
-%	http:file_extension_icon/2 hook with the same signature. Icon is
-%	the  plain  name  of  an  image    file   that  appears  in  the
-%	file-search-path =icons=.
+%	http:mime_type_icon/2 hook with the same  signature. Icon is the
+%	plain name of an image file that appears in the file-search-path
+%	=icons=.
+%
+%	@param  MimeType  is  a  term    Type/SubType   as  produced  by
+%	file_mime_type/2.
 
-file_type_icon(Ext, Icon) :-
-	http:file_extension_icon(Ext, Icon), !.
-file_type_icon(_, 'generic.png').
+mime_type_icon(Ext, Icon) :-
+	http:mime_type_icon(Ext, Icon), !.
+mime_type_icon(_, 'generic.png').
+
+%%	http:mime_type_icon(+MimeType, -IconName) is nondet.
+%
+%	Multi-file hook predicate that can be used to associate icons to
+%	files listed by http_reply_dirindex/3. The   actual icon file is
+%	located by absolute_file_name(icons(IconName), Path, []).
+%
+%	@see serve_files_in_directory/2 serves the images.
 
 :- multifile
-	http:file_extension_icon/2.
+	http:mime_type_icon/2.
 
-http:file_extension_icon(pdf, 'layout.png').
-http:file_extension_icon(c,   'c.png').
-http:file_extension_icon(gz,  'compressed.png').
-http:file_extension_icon(tgz, 'compressed.png').
-http:file_extension_icon(zip, 'compressed.png').
+http:mime_type_icon(application/pdf,	  'layout.png').
+http:mime_type_icon(text/csrc,		  'c.png').
+http:mime_type_icon(application/'x-gzip', 'compressed.png').
+http:mime_type_icon(application/'x-gtar', 'compressed.png').
+http:mime_type_icon(application/zip,	  'compressed.png').
 
 
 		 /*******************************

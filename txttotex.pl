@@ -1,4 +1,4 @@
-:- asserta(user:file_search_path(library, ..)).
+% :- asserta(user:file_search_path(library, ..)).
 
 :- load_files([ library(doc_latex),
 		library('http/html_write'),
@@ -11,7 +11,8 @@
 
 txttotex :-
 	current_prolog_flag(argv, Argv),
-	append(_, [--|Files], Argv), !,
+%	append(_, [--|Files], Argv), !,
+	Files = Argv,
 	maplist(txttotex, Files).
 
 txttotex(File) :-
