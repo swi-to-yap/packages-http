@@ -34,7 +34,6 @@ install:	$(LIBSRCPL) $(SOLIBS)
                   $(INSTALL_PROGRAM) $$f $(DESTDIR)$(SOLIBDIR); \
                 done
 		rm -f $(DESTDIR)$(PLBASE)/$(SOLIB)/$(INSTALL_PLARCH)/http_chunked.@SO@
-		$(INSTALL_PROGRAM) $(SOLIBS) $(DESTDIR)$(PLBASE)/$(SOLIB)/$(INSTALL_PLARCH)
 		mkdir -p $(DESTDIR)$(LIBDIR)
 		mkdir -p $(DESTDIR)$(LIBDIR)/web/icons
 		mkdir -p $(DESTDIR)$(LIBDIR)/web/css
