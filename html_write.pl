@@ -194,7 +194,7 @@ option_default(xhtml_doctype,
 	       'html PUBLIC "-//W3C//DTD XHTML 1.0 \
 	       Transitional//EN" \
 	       "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"').
-option_default(html_content_type, 'text/html').
+option_default(html_content_type, 'text/html; charset=UTF-8').
 option_default(xhtml_content_type, 'application/xhtml+xml; charset=UTF-8').
 
 %%	init_options is det.
@@ -246,6 +246,7 @@ page(Head, Body) -->
 
 page(Style, Head, Body) -->
 	doctype,
+	content_type,
 	html_begin(html),
 	pagehead(Style, Head),
 	pagebody(Style, Body),
@@ -266,6 +267,14 @@ doctype -->
 doctype -->
 	[].
 
+content_type -->
+	{ html_current_option(content_type(Type))
+	}, !,
+	html_post(head, meta([ 'http-equiv'('content-type'),
+			       content(Type)
+			     ], [])).
+content_type -->
+	[].
 
 pagehead(_, Head) -->
 	{ functor(Head, head, _)
@@ -595,7 +604,7 @@ name(Name) -->
 	expand_attribute_value//1.
 
 attribute_value(List) -->
-	{ is_list(List) },
+	{ is_list(List) }, !,
 	attribute_value_m(List).
 attribute_value(Value) -->
 	attribute_value_s(Value).

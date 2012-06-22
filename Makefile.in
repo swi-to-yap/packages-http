@@ -22,9 +22,9 @@ SOLIBS=		http_stream.@SO@ json.@SO@
 all:		$(SOLIBS)
 
 http_stream.@SO@:	$(STREAMOBJ)
-		$(LD) $(LDSOFLAGS) -o $@ $(STREAMOBJ) @LIBS@
+		$(LD) $(LDSOFLAGS) -o $@ $(STREAMOBJ) @LIBS@ $(LIBPLSO)
 json.@SO@:	$(JSONOBJ)
-		$(LD) $(LDSOFLAGS) -o $@ $(JSONOBJ) @LIBS@
+		$(LD) $(LDSOFLAGS) -o $@ $(JSONOBJ) @LIBS@ $(LIBPLSO)
 
 http_stream.o:	$(srcdir)/http_error.c $(srcdir)/http_chunked.c $(srcdir)/cgi_stream.c $(srcdir)/stream_range.c
 
@@ -111,6 +111,9 @@ htmlhead.tex:	$(srcdir)/html_head.pl
 
 httpsession.tex: $(srcdir)/http_session.pl
 		$(PLTOTEX) --subsection 'library(http/http_session)'
+
+httpcors.tex: $(srcdir)/http_cors.pl
+		$(PLTOTEX) --subsection 'library(http/http_cors)'
 
 httpdispatch.tex: $(srcdir)/http_dispatch.pl
 		$(PLTOTEX) --subsection 'library(http/http_dispatch)'
