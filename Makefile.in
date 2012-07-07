@@ -115,7 +115,7 @@ httpsession.tex: $(srcdir)/http_session.pl
 httpcors.tex: $(srcdir)/http_cors.pl
 		$(PLTOTEX) --subsection 'library(http/http_cors)'
 
-httpdispatch.tex: http_dispatch.pl
+httpdispatch.tex: $(srcdir)/http_dispatch.pl
 		$(PLTOTEX) --subsection 'library(http/http_dispatch)'
 
 httpopenid.tex:	$(srcdir)/http_openid.pl
