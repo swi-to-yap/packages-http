@@ -58,9 +58,9 @@ html-install:	install-examples
 install-examples::
 		mkdir -p $(DESTDIR)$(EXDIR)
 		mkdir -p $(DESTDIR)$(EXDIR)/pwp
-		(cd $(scrdir)/examples && $(INSTALL_DATA) $(EXAMPLES) $(DESTDIR)$(EXDIR))
-		(cd $(scrdir)/examples/pwp && $(INSTALL_DATA) *.pwp *.pl $(DESTDIR)$(EXDIR)/pwp)
-		(cd $(scrdir)/examples && $(INSTALL_PROGRAM) $(EXAMPLEEXE) $(DESTDIR)$(EXDIR))
+		(cd $(srcdir)/examples && $(INSTALL_DATA) $(EXAMPLES) $(DESTDIR)$(EXDIR))
+		(cd $(srcdir)/examples/pwp && $(INSTALL_DATA) *.pwp *.pl $(DESTDIR)$(EXDIR)/pwp)
+		(cd $(srcdir)/examples && $(INSTALL_PROGRAM) $(EXAMPLEEXE) $(DESTDIR)$(EXDIR))
 
 uninstall::
 		(cd $(LIBDIR) && rm -f $(LIBPL))
