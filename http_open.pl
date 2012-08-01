@@ -299,9 +299,9 @@ guarded_send_rec_header(Out, In, Stream, Host, RequestURI, Parts, Options) :-
 	method(Options, MNAME),
 	http_version(Version),
 	format(Out,
-	       '~w ~w HTTP/~w\r\n\
-	       Host: ~w\r\n\
-	       User-Agent: ~w\r\n\
+	       '~w ~w HTTP/~w\r\n\c
+	       Host: ~w\r\n\c
+	       User-Agent: ~w\r\n\c
 	       Connection: close\r\n',
 	       [MNAME, RequestURI, Version, Host, Agent]),
 	x_headers(Options, Out),
@@ -590,7 +590,12 @@ read_header(In, Code, Comment, Lines) :-
 	phrase(first_line(Code, Comment), Line),
 	debug(http(open), '~w ~w', [Code, Comment]),
 	read_line_to_codes(In, Line2),
-	rest_header(Line2, In, Lines), !.
+	rest_header(Line2, In, Lines), !,
+	(   debugging(http(open))
+	->  forall(member(HL, Lines),
+		   debug(http(open), '~s', [HL]))
+	;   true
+	).
 read_header(_, 500, 'Invalid reply header', []).
 
 rest_header("", _, []) :- !.		% blank line: end of header

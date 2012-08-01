@@ -621,7 +621,12 @@ content_length_in_encoding(Enc, Stream, Bytes) :-
 %	  =|text/xml|=
 %
 %	  * xml(+Type, +Term)
-%	  Post the result of xml_write/3 using the given Mime-type.
+%	  Post the result of xml_write/3 using the given Mime-type
+%	  and an empty option list to xml_write/3.
+%
+%	  * xml(+Type, +Term, +Options)
+%	  Post the result of xml_write/3 using the given Mime-type
+%	  and option list for xml_write/3.
 %
 %	  * file(+File)
 %	  Send contents of a file. Mime-type is determined by
@@ -635,15 +640,21 @@ content_length_in_encoding(Enc, Stream, Bytes) :-
 %	  instead of a real file.  See new_memory_file/1.
 %
 %	  * codes(+Codes)
-%	  As string(text/plain, Codes).
+%	  As codes(text/plain, Codes).
 %
 %	  * codes(+Type, +Codes)
 %	  Send Codes using the indicated MIME-type.
 %
-%	  * cgi_stream(+Stream, +Len)
-%	  Read the input from Stream which, like CGI data starts with a partial
-%	  HTTP header. The fields of this header are merged with the provided
-%	  HdrExtra fields. The first Len characters of Stream are used.
+%	  * atom(+Atom)
+%	  As atom(text/plain, Atom).
+%
+%	  * atom(+Type, +Atom)
+%	  Send Atom using the indicated MIME-type.
+%
+%	  * cgi_stream(+Stream, +Len) Read the input from Stream which,
+%	  like CGI data starts with a partial HTTP header. The fields of
+%	  this header are merged with the provided HdrExtra fields. The
+%	  first Len characters of Stream are used.
 %
 %	  * form(+ListOfParameter)
 %	  Send data of the MIME type application/x-www-form-urlencoded as
@@ -664,18 +675,20 @@ content_length_in_encoding(Enc, Stream, Bytes) :-
 
 http_post_data(Data, Out, HdrExtra) :-
 	http_client:post_data_hook(Data, Out, HdrExtra), !.
-http_post_data(html(HTML), Out, HdrExtra) :-
+http_post_data(html(HTML), Out, HdrExtra) :- !,
 	phrase(post_header(html(HTML), HdrExtra), Header),
 	format(Out, '~s', [Header]),
 	print_html(Out, HTML).
-http_post_data(xml(XML), Out, HdrExtra) :-
-	http_post_data(xml(text/xml, XML), Out, HdrExtra).
-http_post_data(xml(Type, XML), Out, HdrExtra) :-
+http_post_data(xml(XML), Out, HdrExtra) :- !,
+	http_post_data(xml(text/xml, XML, []), Out, HdrExtra).
+http_post_data(xml(Type, XML), Out, HdrExtra) :- !,
+	http_post_data(xml(Type, XML, []), Out, HdrExtra).
+http_post_data(xml(Type, XML, Options), Out, HdrExtra) :- !,
 	setup_call_cleanup(
 	    new_memory_file(MemFile),
 	    (   setup_call_cleanup(
 		    open_memory_file(MemFile, write, MemOut),
-		    xml_write(MemOut, XML, []),
+		    xml_write(MemOut, XML, Options),
 		    close(MemOut)),
 		http_post_data(memory_file(Type, MemFile), Out, HdrExtra)
 	    ),
@@ -704,7 +717,20 @@ http_post_data(codes(Codes), Out, HdrExtra) :- !,
 	http_post_data(codes(text/plain, Codes), Out, HdrExtra).
 http_post_data(codes(Type, Codes), Out, HdrExtra) :- !,
 	phrase(post_header(codes(Type, Codes), HdrExtra), Header),
-	format(Out, '~s~s', [Header, Codes]).
+	format(Out, '~s', [Header]),
+	setup_call_cleanup(
+	    set_stream(Out, encoding(utf8)),
+	    format(Out, '~s', [Codes]),
+	    set_stream(Out, encoding(octet))).
+http_post_data(atom(Atom), Out, HdrExtra) :- !,
+	http_post_data(atom(text/plain, Atom), Out, HdrExtra).
+http_post_data(atom(Type, Atom), Out, HdrExtra) :- !,
+	phrase(post_header(atom(Type, Atom), HdrExtra), Header),
+	format(Out, '~s', [Header]),
+	setup_call_cleanup(
+	    set_stream(Out, encoding(utf8)),
+	    write(Out, Atom),
+	    set_stream(Out, encoding(octet))).
 http_post_data(cgi_stream(In, _Len), Out, HdrExtra) :- !,
 	debug(obsolete, 'Obsolete 2nd argument in cgi_stream(In,Len)', []),
 	http_post_data(cgi_stream(In), Out, HdrExtra).
@@ -800,8 +826,13 @@ post_header(cgi_data(Size), HdrExtra) -->
 	"\r\n".
 post_header(codes(Type, Codes), HdrExtra) -->
 	header_fields(HdrExtra, Len),
-	content_length(ascii_string(Codes), Len),
-	content_type(Type),
+	content_length(codes(Codes, utf8), Len),
+	content_type(Type, utf8),
+	"\r\n".
+post_header(atom(Type, Atom), HdrExtra) -->
+	header_fields(HdrExtra, Len),
+	content_length(atom(Atom, utf8), Len),
+	content_type(Type, utf8),
 	"\r\n".
 
 
@@ -841,8 +872,8 @@ reply_header(string(Type, String), HdrExtra, Code) -->
 	vstatus(ok, Code),
 	date(now),
 	header_fields(HdrExtra, CLen),
-	content_length(ascii_string(String), CLen),
-	content_type(Type),
+	content_length(codes(String, utf8), CLen),
+	content_type(Type, utf8),
 	"\r\n".
 reply_header(html(Tokens), HdrExtra, Code) -->
 	vstatus(ok, Code),
@@ -1079,8 +1110,22 @@ content_length(Reply, Len) -->
 
 length_of(_, Len) :-
 	nonvar(Len), !.
-length_of(ascii_string(String), Len) :- !,
-	length(String, Len).
+length_of(codes(String, Encoding), Len) :- !,
+	setup_call_cleanup(
+	    open_null_stream(Out),
+	    ( set_stream(Out, encoding(Encoding)),
+	      format(Out, '~s', [String]),
+	      byte_count(Out, Len)
+	    ),
+	    close(Out)).
+length_of(atom(Atom, Encoding), Len) :- !,
+	setup_call_cleanup(
+	    open_null_stream(Out),
+	    ( set_stream(Out, encoding(Encoding)),
+	      format(Out, '~a', [Atom]),
+	      byte_count(Out, Len)
+	    ),
+	    close(Out)).
 length_of(file(File), Len) :- !,
 	size_file(File, Len).
 length_of(memory_file(Handle), Len) :- !,
