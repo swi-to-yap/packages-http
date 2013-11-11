@@ -18,6 +18,8 @@ STREAMOBJ=	http_stream.o
 JSONOBJ=	json.o
 SOLIBS=		http_stream.@SO@ json.@SO@
 
+LIBSRCPL=	$(addprefix $(srcdir)/, $(LIBPL))
+
 all:		$(SOLIBS)
 
 http_stream.@SO@:	$(STREAMOBJ)
@@ -35,10 +37,10 @@ install:	$(LIBSRCPL) $(SOLIBS)
 		mkdir -p $(DESTDIR)$(PKGPLLIBDIR)
 		mkdir -p $(DESTDIR)$(PKGPLLIBDIR)/web/icons
 		mkdir -p $(DESTDIR)$(PKGPLLIBDIR)/web/css
-		$(INSTALL_DATA) $(LIBPL) $(DESTDIR)$(PKGPLLIBDIR)
-		$(INSTALL_DATA) README $(DESTDIR)$(PKGPLLIBDIR)/README$(TXTEXT)
-		$(INSTALL_DATA) web/icons/*.png $(DESTDIR)$(PKGPLLIBDIR)/web/icons
-		$(INSTALL_DATA) web/css/*.css $(DESTDIR)$(PKGPLLIBDIR)/web/css
+		$(INSTALL_DATA) $(LIBSRCPL) $(DESTDIR)$(PKGPLLIBDIR)
+		$(INSTALL_DATA) $(srcdir)/README $(DESTDIR)$(PKGPLLIBDIR)/README$(TXTEXT)
+		$(INSTALL_DATA) $(srcdir)/web/icons/*.png $(DESTDIR)$(PKGPLLIBDIR)/web/icons
+		$(INSTALL_DATA) $(srcdir)/web/css/*.css $(DESTDIR)$(PKGPLLIBDIR)/web/css
 		$(MKPKGINDEX)
 		$(MKINDEX)
 
