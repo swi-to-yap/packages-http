@@ -34,6 +34,7 @@
 	    http_reply_file/3,		% +File, +Options, +Request
 	    http_redirect/3,		% +How, +Path, +Request
 	    http_404/2,			% +Options, +Request
+	    http_switch_protocol/2,	% :Goal, +Options
 	    http_current_handler/2,	% ?Path, ?Pred
 	    http_current_handler/3,	% ?Path, ?Pred
 	    http_location_by_id/2,	% +ID, -Location
@@ -60,6 +61,7 @@
 		       pass_to(http_safe_file/2, 2)
 		     ]).
 :- predicate_options(http_safe_file/2, 2, [unsafe(boolean)]).
+:- predicate_options(http_switch_protocol/2, 2, []).
 
 /** <module> Dispatch requests in the HTTP server
 
@@ -71,7 +73,7 @@ timeout handling and user authentication.  The typical setup is:
 ==
 server(Port, Options) :-
 	http_server(http_dispatch,
-		    [ port(Port),
+		    [ port(Port)
 		    | Options
 		    ]).
 
@@ -167,7 +169,8 @@ write_index(Request) :-
 :- meta_predicate
 	http_handler(+, :, +),
 	http_current_handler(?, :),
-	http_current_handler(?, :, ?).
+	http_current_handler(?, :, ?),
+	http_switch_protocol(2, +).
 
 http_handler(Path, Pred, Options) :-
 	strip_module(Pred, M, P),
@@ -199,7 +202,7 @@ system:term_expansion((:- http_handler(Path, Pred, Options)), Clause) :-
 
 http_delete_handler(id(Id)) :- !,
 	clause(handler(_Path, _:Pred, _, Options), true, Ref),
-	functor(Pred, _, DefID),
+	functor(Pred, DefID, _),
 	option(id(Id0), Options, DefID),
 	Id == Id0,
 	erase(Ref),
@@ -746,6 +749,37 @@ http_404(Options, Request) :-
 http_404(_Options, Request) :-
 	memberchk(path(Path), Request),
 	throw(http_reply(not_found(Path))).
+
+
+%%	http_switch_protocol(:Goal, +Options)
+%
+%	Send an =|HTTP 101 Switching   Protocols"|= reply. After sending
+%	the  reply,  the  HTTP  library    calls   call(Goal,  InStream,
+%	OutStream), where InStream and OutStream are  the raw streams to
+%	the HTTP client. This allows the communication to continue using
+%	an an alternative protocol.
+%
+%	If Goal fails or throws an exception,  the streams are closed by
+%	the server. Otherwise  Goal  is   responsible  for  closing  the
+%	streams. Note that  Goal  runs  in   the  HTTP  handler  thread.
+%	Typically, the handler should be   registered  using the =spawn=
+%	option if http_handler/3 or Goal   must  call thread_create/3 to
+%	allow the HTTP worker to return to the worker pool.
+%
+%	The streams use binary  (octet)  encoding   and  have  their I/O
+%	timeout set to the server  timeout   (default  60  seconds). The
+%	predicate set_stream/2 can  be  used   to  change  the encoding,
+%	change or cancel the timeout.
+%
+%	This predicate interacts with the server  library by throwing an
+%	exception.
+%
+%	@param	Options is reserved for future extensions.  It must be
+%		initialised to the empty list ([]).
+%	@throws	http_reply(switch_protocol(Goal, Options))
+
+http_switch_protocol(Goal, Options) :-
+	throw(http_reply(switch_protocol(Goal, Options))).
 
 
 		 /*******************************

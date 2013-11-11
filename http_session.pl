@@ -1,11 +1,9 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker, Matt Lilley
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2006-2011, University of Amsterdam
+    Copyright (C): 2006-2013, University of Amsterdam
 			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
@@ -33,12 +31,16 @@
 
 :- module(http_session,
 	  [ http_set_session_options/1,	% +Options
+	    http_set_session/1,		% +Option
+	    http_session_option/1,	% ?Option
 
 	    http_session_id/1,		% -SessionId
 	    http_in_session/1,		% -SessionId
 	    http_current_session/2,	% ?SessionId, ?Data
 	    http_close_session/1,	% +SessionId
             http_open_session/2,	% -SessionId, +Options
+
+	    http_session_cookie/1,	% -Cookie
 
 	    http_session_asserta/1,	% +Data
 	    http_session_assert/1,	% +Data
@@ -153,10 +155,10 @@ session_option(proxy_enabled, boolean).
 
 http_set_session_options([]).
 http_set_session_options([H|T]) :-
-	http_session_option(H),
+	http_set_session_option(H),
 	http_set_session_options(T).
 
-http_session_option(Option) :-
+http_set_session_option(Option) :-
 	functor(Option, Name, Arity),
 	arg(1, Option, Value),
 	(   session_option(Name, Type)
@@ -166,6 +168,53 @@ http_session_option(Option) :-
 	functor(Free, Name, Arity),
 	retractall(session_setting(Free)),
 	assert(session_setting(Option)).
+
+%%	http_session_option(?Option) is nondet.
+%
+%	True if Option is a current option of the session system.
+
+http_session_option(Option) :-
+	session_setting(Option).
+
+%%	session_setting(+SessionID, ?Setting) is semidet.
+%
+%	Find setting for SessionID. It  is   possible  to  overrule some
+%	session settings using http_session_set(Setting).
+
+session_setting(SessionId, Setting) :-
+	nonvar(Setting),
+	functor(Setting, Name, 1),
+	local_option(Name, Value, Term),
+	session_data(SessionId, '$setting'(Term)), !,
+	arg(1, Setting, Value).
+session_setting(_, Setting) :-
+	session_setting(Setting).
+
+%%	http_set_session(Setting) is det.
+%
+%	Overrule a setting for the current  session. Currently, the only
+%	setting that can be overruled is =timeout=.
+%
+%	@error	permission_error(set, http_session, Setting) if setting
+%		a setting that is not supported on per-session basis.
+
+http_set_session(Setting) :-
+	http_session_id(SessionId),
+	functor(Setting, Name, Arity),
+	(   local_option(Name, _, _)
+	->  true
+	;   permission_error(set, http_session, Setting)
+	),
+	arg(1, Setting, Value),
+	(   session_option(Name, Type)
+	->  must_be(Type, Value)
+	;   domain_error(http_session_option, Setting)
+	),
+	functor(Free, Name, Arity),
+	retractall(session_data(SessionId, '$setting'(Free))),
+	assert(session_data(SessionId, '$setting'(Setting))).
+
+local_option(timeout, X, timeout(X)).
 
 %%	http_session_id(-SessionId) is det.
 %
@@ -197,17 +246,27 @@ http_session_id(SessionID) :-
 %	@see http_session_id/1
 
 http_in_session(SessionID) :-
-	(   nb_current(http_session_id, ID),
-	    ID \== []
-	->  true
-	;   http_current_request(Request),
-	    memberchk(session(ID), Request),
-	    b_setval(http_session_id, ID)
-	;   b_setval(http_session_id, no_session),
-	    fail
-	),
+	nb_current(http_session_id, ID),
+	ID \== [], !,
 	ID \== no_session,
 	SessionID = ID.
+http_in_session(SessionID) :-
+	http_current_request(Request),
+	http_in_session(Request, SessionID).
+
+http_in_session(Request, SessionID) :-
+	memberchk(session(ID), Request),
+	b_setval(http_session_id, ID), !,
+	SessionID = ID.
+http_in_session(Request, SessionID) :-
+	memberchk(cookie(Cookies), Request),
+	session_setting(cookie(Cookie)),
+	memberchk(Cookie=SessionID0, Cookies),
+	peer(Request, Peer),
+	valid_session_id(SessionID0, Peer), !,
+	b_setval(http_session_id, SessionID0),
+	SessionID = SessionID0.
+
 
 %%	http_session(+RequestIn, -RequestOut, -SessionID) is semidet.
 %
@@ -241,7 +300,7 @@ http_session(Request0, Request, SessionID) :-
 
 create_session(Request0, Request, SessionID) :-
 	http_gc_sessions,
-	gen_cookie(SessionID),
+	http_session_cookie(SessionID),
 	session_setting(cookie(Cookie)),
 	session_setting(path(Path)),
 	format('Set-Cookie: ~w=~w; path=~w\r\n', [Cookie, SessionID, Path]),
@@ -299,7 +358,7 @@ http:request_expansion(Request0, Request) :-
 
 peer(Request, Peer) :-
 	(   session_setting(proxy_enabled(true)),
-	    memberchk(x_forwarded_for(Peer), Request)
+	    http_peer(Request, Peer)
 	->  true
 	;   memberchk(peer(Peer), Request)
 	->  true
@@ -326,7 +385,7 @@ open_session(SessionID, Peer) :-
 valid_session_id(SessionID, Peer) :-
 	current_session(SessionID, SessionPeer),
 	get_time(Now),
-	(   session_setting(timeout(Timeout)),
+	(   session_setting(SessionID, timeout(Timeout)),
 	    Timeout > 0
 	->  get_last_used(SessionID, Last),
 	    Idle is Now - Last,
@@ -416,9 +475,9 @@ http_session_data(Data) :-
 
 http_current_session(SessionID, Data) :-
 	get_time(Now),
-	get_last_used(SessionID, Last),
+	get_last_used(SessionID, Last),	% binds SessionID
 	Idle is Now - Last,
-	(   session_setting(timeout(Timeout)),
+	(   session_setting(SessionID, timeout(Timeout)),
 	    Timeout > 0
 	->  Idle =< Timeout
 	;   true
@@ -479,7 +538,7 @@ http_close_session(SessionId, Expire) :-
 	    ;	true
 	    ),
 	    (	Expire == true
-	    ->	expire_session_cookie(SessionId)
+	    ->	expire_session_cookie
 	    ;	true
 	    ),
 	    retractall(current_session(SessionId, _)),
@@ -493,11 +552,9 @@ http_close_session(SessionId, Expire) :-
 %%	expire_session_cookie(+SessionId) is det.
 %
 %	Emit a request to delete a session  cookie. This is only done if
-%	http_close_session/1 is called from a   handler executing inside
-%	the session and the handler is still in `header mode'.
+%	http_close_session/1 is still in `header mode'.
 
-expire_session_cookie(SessionId) :-
-	http_in_session(SessionId),
+expire_session_cookie :-
 	in_header_state,
 	session_setting(cookie(Cookie)),
 	session_setting(path(Path)), !,
@@ -505,41 +562,55 @@ expire_session_cookie(SessionId) :-
 		expires=Tue, 01-Jan-1970 00:00:00 GMT; \c
 		path=~w\r\n',
 	       [Cookie, Path]).
-expire_session_cookie(_).
+expire_session_cookie.
 
 in_header_state :-
 	current_output(CGI),
 	cgi_property(CGI, state(header)), !.
 
 
-%	http_gc_sessions/0
+%%	http_gc_sessions is det.
 %
-%	Delete dead sessions. When  should  we   be  calling  this? This
-%	assumes that updated sessions are at the end of the clause list,
-%	so we can break  as  soon   as  we  encounter  a no-yet-timedout
-%	session.
+%	Delete dead sessions. Currently runs session GC if a new session
+%	is opened and the last session GC was more than a minute ago.
+
+:- dynamic
+	last_gc/1.
 
 http_gc_sessions :-
-	session_setting(timeout(Timeout)),
-	Timeout > 0, !,
-	get_time(Now),
-	(   last_used(SessionID, Last),
-	    Idle is Now - Last,
-	    (	Idle > Timeout
-	    ->	http_close_session(SessionID),
-		fail
-	    ;	!
-	    )
+	(   with_mutex(http_session_gc, need_sesion_gc)
+	->  do_http_gc_sessions
 	;   true
 	).
-http_gc_sessions.
+
+need_sesion_gc :-
+	get_time(Now),
+	(   last_gc(LastGC),
+	    Now-LastGC < 60
+	->  true
+	;   retractall(last_gc(_)),
+	    asserta(last_gc(Now)),
+	    do_http_gc_sessions
+	).
+
+do_http_gc_sessions :-
+	get_time(Now),
+	(   last_used(SessionID, Last),
+	      session_setting(SessionID, timeout(Timeout)),
+	      Timeout > 0,
+	      Idle is Now - Last,
+	      Idle > Timeout,
+	        http_close_session(SessionID),
+	    fail
+	;   true
+	).
 
 
 		 /*******************************
 		 *	       UTIL		*
 		 *******************************/
 
-%%	gen_cookie(-Cookie) is det.
+%%	http_session_cookie(-Cookie) is det.
 %
 %	Generate a random cookie that  can  be   used  by  a  browser to
 %	identify  the  current  session.  The   cookie  has  the  format
@@ -547,13 +618,13 @@ http_gc_sessions.
 %	numbers  and  [.<route>]  is  the    optionally   added  routing
 %	information.
 
-gen_cookie(Cookie) :-
+http_session_cookie(Cookie) :-
 	route(Route), !,
 	random_4(R1,R2,R3,R4),
 	format(atom(Cookie),
 		'~`0t~16r~4|-~`0t~16r~9|-~`0t~16r~14|-~`0t~16r~19|.~w',
 		[R1,R2,R3,R4,Route]).
-gen_cookie(Cookie) :-
+http_session_cookie(Cookie) :-
 	random_4(R1,R2,R3,R4),
 	format(atom(Cookie),
 		'~`0t~16r~4|-~`0t~16r~9|-~`0t~16r~14|-~`0t~16r~19|',

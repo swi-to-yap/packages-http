@@ -23,19 +23,21 @@ test_http :-
 		    http_get
 		  ]).
 
+run_network_tests :-
+	\+ getenv('USE_PUBLIC_NETWORK_TESTS', false).
 
-:- begin_tests(http_open).
+:- begin_tests(http_open, [condition(run_network_tests)]).
 
 test(read, true) :-
      http_open('http://www.swi-prolog.org/', In, []),
      read_stream_to_codes(In, Codes),
      close(In),
-     appendchk(_, "http://www.swi-prolog.org", _, Codes).
+     contains_codes("http://www.swi-prolog.org", Codes).
 test(redirect, true) :-
      http_open('http://www.swi-prolog.org', In, []),
      read_stream_to_codes(In, Codes),
      close(In),
-     appendchk(_, "http://www.swi-prolog.org", _, Codes).
+     contains_codes("http://www.swi-prolog.org", Codes).
 test(chunked, true(Codes == Ref)) :-
      http_open('http://www.swi-prolog.org/Tests/chunked/data', In, []),
      read_stream_to_codes(In, Codes),
@@ -44,11 +46,11 @@ test(chunked, true(Codes == Ref)) :-
 
 :- end_tests(http_open).
 
-:- begin_tests(http_get).
+:- begin_tests(http_get, [condition(run_network_tests)]).
 
 test(read, true) :-
      http_get('http://www.swi-prolog.org/', Data, [to(codes)]),
-     appendchk(_, "http://www.swi-prolog.org", _, Data).
+     contains_codes("http://www.swi-prolog.org", Data).
 
 test(chunked, true(Data == Ref)) :-
      http_get('http://www.swi-prolog.org/Tests/chunked/data',
@@ -61,13 +63,10 @@ test(chunked, true(Data == Ref)) :-
 		 *	       UTIL		*
 		 *******************************/
 
-read_file_to_codes(File, Codes) :-
-	open(File, read, In),
-	call_cleanup(read_stream_to_codes(In, Codes), close(In)).
-
-appendchk(Pre, Middle, Post, List) :-
-	append(Pre, Rest, List),
-	append(Middle, Post, Rest), !.
+contains_codes(String, Codes) :-
+	string_codes(String, Needle),
+	append(_Pre, Rest, Codes),
+	append(Needle, _Post, Rest), !.
 
 %%	chunked_data(-String) is det.
 %

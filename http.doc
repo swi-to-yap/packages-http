@@ -17,10 +17,10 @@
 
 \title{SWI-Prolog HTTP support}
 \author{Jan Wielemaker \\
-	HCS, \\
+	VU University Amsterdam \\
 	University of Amsterdam \\
 	The Netherlands \\
-	E-mail: \email{J.Wielemaker@uva.nl}}
+	E-mail: \email{J.Wielemaker@vu.nl}}
 
 \maketitle
 
@@ -31,6 +31,12 @@ capabilities from SWI-Prolog. Both server and client are modular
 libraries. The server can be operated from the Unix \program{inetd}
 super-daemon as well as as a stand-alone server that runs on all
 platforms supported by SWI-Prolog.
+
+Further reading:
+\begin{shortlist}
+    \item \url[HOWTO collection]{http://www.swi-prolog.org/howto/http/}
+    \item \url[Tutorial by Anne Ogborn]{http://www.pathwayslms.com/swipltuts/html}
+\end{shortlist}
 \end{abstract}
 
 \vfill
@@ -45,6 +51,7 @@ platforms supported by SWI-Prolog.
 
 
 \section{Introduction}
+\label{sec:http-intro}
 
 The HTTP (HyperText Transfer Protocol) is the W3C standard protocol for
 transferring information between a web-client (browser) and a
@@ -60,6 +67,7 @@ web-servers from SWI-Prolog and turn Prolog into a web-server.
 
 
 \subsection*{Acknowledgements}
+\label{sec:http-acknowledgements}
 
 This work has been carried out under the following projects:
 \url[GARP]{http://hcs.science.uva.nl/projects/GARP/},
@@ -74,6 +82,7 @@ van Ossenbruggen, Michiel Hildebrandt, Matt Lilley and Keri Harris.
 
 
 \section{The HTTP client libraries}
+\label{sec:http-clients}
 
 This package provides two packages for building HTTP clients. The first,
 \pllib{http/http_open} is a lightweight library for opening a HTTP
@@ -84,7 +93,8 @@ a plug-in mechanism providing conversions based on the MIME content-type.
 
 \input{httpopen.tex}
 
-\subsection{The \pllib{http/http_client} library} \label{sec:httpclient}
+\subsection{The \pllib{http/http_client} library}
+\label{sec:httpclient}
 
 The \pllib{http/http_client} library provides more powerful access to
 reading HTTP resources, providing \jargon{keep-alive} connections,
@@ -169,8 +179,8 @@ it literally according to \arg{Target}, which is one of:
     \begin{description}
         \termitem{stream}{Output}
 Append the data to the given stream, which must be a Prolog stream open
-for writing. This can be used to save the data in a (memory-)file, XPCE
-object, forward it to process using a pipe, etc.
+for writing. This can be used to save the data in a (memory-)file,
+forward it to process using a pipe, etc.
 
 	\termitem{atom}{}
 Return the result as an atom.  Though SWI-Prolog has no limit on the
@@ -363,12 +373,41 @@ print_request([H|T]) :-
 	print_request(T).
 \end{code}
 
-The infrastructure recognises the header
-\texttt{Transfer-encoding:~chunked}, causing it to use chunked encoding
+The infrastructure recognises the header fields described below. Other
+header lines are passed verbatim to the client. Typical examples are
+\texttt{Set-Cookie} and authentication headers (see \secref{auth}).
+
+\begin{description}
+    \item[Content-type:~\arg{Type}]
+This field is passed to the client and used by the infrastructure to
+determine the \jargon{encoding} to use for the stream. If \arg{type}
+matches \const{text/*} or the type matches with \const{UTF-8} (case
+insensitive), the server uses UTF-8 encoding. The user may force UTF-8
+encoding for arbitrary content types by adding \texttt{; charset=UTF-8}
+to the end of the \const{Content-type} header.
+
+    \item[Transfer-encoding:~chunked]
+Causes the server to use \jargon{chunked} encoding
 if the client allows for it. See also \secref{transfer} and the
-\const{chunked} option in http_handler/3. Other header lines are passed
-verbatim to the client.   Typical examples are \texttt{Set-Cookie} and
-authentication headers (see \secref{auth}.
+\const{chunked} option in http_handler/3.
+
+    \item[Connection:~close]
+Causes the connection to be closed after the transfer.  The default is
+to keep it open `Keep-Alive' if possible.
+
+    \item[Location:~\arg{URL}]
+This header may be combined with the \const{Status} header to force a
+\jargon{redirect} response to the given \arg{URL}.  The message body
+must be empty. Handling this header is primarily intended for
+compatibility with the CGI conventions. Prolog code should use
+http_redirect/3.
+
+    \item[Status:~\arg{Status}]
+This header can be combined with \const{Location}, where \arg{Status}
+must be one of 301 (moved), 302 (moved temporary, default) or 303 (see
+other).
+\end{description}
+
 
 
 \subsubsection{Returning special status codes}	\label{sec:httpspecials}
@@ -437,13 +476,43 @@ code to generate an HTTP 401 reply.
     ...,
     (   http_authenticate(basic(passwd), Request, User)
     ->  true
-    ;   throw(http_reply(authorise(basic, Realm)))
+    ;   throw(http_reply(authorise(basic(Realm))))
     ).
 \end{code}
 
 Alternatively \term{basic}{+PasswordFile} can be passed as an option to
 http_handler/3.
 \end{description}
+
+\subsection:{Custom Error Pages}
+It is possible to create arbitrary error pages for responses generated when a
+http_reply term is thrown. Currently this is only supported for status 403
+(authentication required). To do this, instead of throwing http_reply(authorise(Term))
+throw http_reply(authorise(Term), [], Key), where Key is an arbitrary term relating
+to the page you want to generate. You must then also define a clause of the multifile
+predicate http:status_page_hook:
+\begin{description}
+    \predicate{http}{+StatusCode, +Key, -CustomHTML}
+StatusCode is the page status code (such as 401), Key is the third argument of the
+http_reply exception which was thrown, and CustomHTML is a list of HTML tokens. The
+default page for 401 is generated via this code:
+\begin{code}
+        phrase(page([ title('401 Authorization Required')
+		    ],
+		    [ h1('Authorization Required'),
+		      p(['This server could not verify that you ',
+			 'are authorized to access the document ',
+			 'requested.  Either you supplied the wrong ',
+			 'credentials (e.g., bad password), or your ',
+			 'browser doesn\'t understand how to supply ',
+			 'the credentials required.'
+			]),
+		      \address
+		    ]),
+	       CustomHTML).
+\end{code}
+\end{description}
+
 
 \input{httpopenid.tex}
 
@@ -489,7 +558,7 @@ the value is returned as a list. Type checking options are processed on
 each value.
 
     \termitem{zero_or_more}{}
-Deprecated.  Use \term{List}{Type}.
+Deprecated.  Use \term{list}{Type}.
 \end{description}
 
 The type and conversion options are given below. The type-language can
@@ -710,6 +779,7 @@ X = [ input(user),
 
 
 \subsubsection{Handling POST requests}
+\label{sec:http-read-post}
 
 Where the HTTP \const{GET} operation is intended to get a document,
 using a \arg{path} and possibly some additional search information,
@@ -738,6 +808,7 @@ if the plug-in \pllib{http/http_mime_plugin} is loaded.
 
 
 \subsection{Running the server}
+\label{sec:http-running-server}
 
 The functionality of the server should be defined in one Prolog file (of
 course this file is allowed to load other files). Depending on the
@@ -766,17 +837,6 @@ the GUI tracer provides reasonable support for multi-threaded
 applications using the tspy/1 command. It can provide fast communication
 to multiple clients and can be used for more demanding servers.
 
-    \item [Using \pllib{xpce_httpd} for an event-driven server]
-This approach provides a single-threaded event-driven application.  The
-clients talk to XPCE sockets that collect an HTTP request.  The server
-infra-structure can talk to multiple clients simultaneously, but once
-a request is complete the wrappers call the user's goal and blocks all
-further activity until the request is handled.  Requests from multiple
-clients are thus fully serialised in one Prolog process.
-
-This server setup is very suitable for debugging as well as embedded
-server in simple applications in a fairly controlled environment.
-
     \item [Using \pllib{inetd_httpd} for server-per-client]
 In this setup the Unix \program{inetd} user-daemon is used to initialise
 a server for each connection.  This approach is especially suitable for
@@ -790,6 +850,7 @@ can be started quickly.
 
 
 \subsubsection{Common server interface options}
+\label{sec:http-server-options}
 
 All the server interfaces provide \term{http_server}{:Goal, +Options}
 to create the server.  The list of options differ, but the servers share
@@ -812,10 +873,9 @@ As a single persistent server process maintains communication to all
 clients startup time is not an important issue and the server can
 easily maintain state-information for all clients.
 
-In addition to the functionality provided by the other (XPCE and
-inetd) servers, the threaded server can also be used to realise an
-HTTPS server exploiting the \pllib{ssl} library.  See option
-\term{ssl}{+SSLOptions} below.
+In addition to the functionality provided by the inetd server, the
+threaded server can also be used to realise an HTTPS server exploiting
+the \pllib{ssl} library. See option \term{ssl}{+SSLOptions} below.
 
 
 \begin{description}
@@ -958,61 +1018,10 @@ image thumbnails.
 \end{code}
 \end{description}
 
-
-\subsubsection{From an interactive Prolog session using XPCE}
-
-The \pllib{http/xpce_httpd.pl} provides the infrastructure to manage
-multiple clients with an event-driven control-structure. This version
-can be started from an interactive Prolog session, providing a
-comfortable infra-structure to debug the body of your server. It also
-allows the combination of an (XPCE-based) GUI with web-technology in one
-application.
-
-\begin{description}
-    \predicate{http_server}{2}{:Goal, +Options}
-Create an instance of \class{interactive_httpd}.  \arg{Options} must
-provide the \term{port}{?Port} option to specify the port the server
-should listen to. If \arg{Port} is unbound an arbitrary free port is
-selected and \arg{Port} is unified to this port-number.  Currently
-no options are defined.
-\end{description}
-
-The file \file{demo_xpce} gives a typical example of this wrapper,
-assuming \file{demo_body} defines the predicate reply/1.
-
-\begin{code}
-:- use_module(xpce_httpd).
-:- use_module(demo_body).
-
-server(Port) :-
-	http_server(reply, Port, []).
-\end{code}
-
-The created server opens a server socket at the selected address and
-waits for incoming connections. On each accepted connection it collects
-input until an HTTP request is complete. Then it opens an input stream
-on the collected data and using the output stream directed to the XPCE
-\class{socket} it calls http_wrapper/5. This approach is fundamentally
-different compared to the other approaches:
-
-\begin{itemlist}
-    \item [Server can handle multiple connections]
-When \emph{inetd} will start a server for each \emph{client}, and CGI
-starts a server for each \emph{request}, this approach starts a single
-server handling multiple clients.
-
-    \item [Requests are serialised]
-All calls to \arg{Goal} are fully serialised, processing on behalf of a
-new client can only start after all previous requests are answered. This
-easier and quite acceptable if the server is mostly inactive and
-requests take not very long to process.
-
-    \item [Lifetime of the server]
-The server lives as long as Prolog runs.
-\end{itemlist}
-
+\input{httpunixdaemon.tex}
 
 \subsubsection{From (Unix) inetd}
+\label{sec:http-inetd}
 
 All modern Unix systems handle a large number of the services they run
 through the super-server \emph{inetd}. This program reads
@@ -1069,11 +1078,13 @@ For more information, please check \manref{inetd.conf}{5}.
 
 
 \subsubsection{MS-Windows}
+\label{sec:http-inetd-mswin}
 
 There are rumours that \emph{inetd} has been ported to Windows.
 
 
 \subsubsection{As CGI script}
+\label{sec:http-server-as-cgi}
 
 To be done.
 
@@ -1140,6 +1151,7 @@ appear in many places in generated documents.  JavaScript can create
 URLs on the fly, which makes rewriting virtually impossible.
 
 \subsection{The wrapper library}
+\label{sec:http-wrapper}
 
 The body is called by the module \pllib{http/http_wrapper.pl}. This
 module realises the communication between the I/O streams and the body
@@ -1211,7 +1223,7 @@ unifies \arg{RelPath} to \arg{AbsPath}.
 
 \input{httplog}
 
-\subsection{Debugging Servers}				\label{sec:debug}
+\subsection{Debugging Servers}				\label{sec:http-debug}
 
 The library \pllib{http/http_error.pl} defines a hook that decorates
 uncaught exceptions with a stack-trace. This will generate a \emph{500
@@ -1501,6 +1513,7 @@ End an element.  See html_begin/1 for details.
 
 
 \subsubsection{Emitting HTML documents}
+\label{sec:html-write}
 
 The non-terminal html//1 translates a specification into a list of
 atoms and layout instructions. Currently the layout instructions are
@@ -1568,12 +1581,11 @@ provide the \const{Content-length} field of an HTTP reply-header.
 \input{post.tex}
 
 \subsubsection{Adding rules for html//1}
+\label{sec:html-write-rules}
 
 In some cases it is practical to extend the translations imposed by
-html//1. When using XPCE for example, it is comfortable to be able
-defining default translation to HTML for objects. We also used this
-technique to define translation rules for the output of the SWI-Prolog
-\pllib{sgml} package.
+html//1. We used this technique to define translation rules for the
+output of the SWI-Prolog \pllib{sgml} package.
 
 The html//1 non-terminal first calls the multifile ruleset html_write:expand//1.
 
@@ -1617,7 +1629,8 @@ library source for examples.
 \end{description}
 
 
-\subsubsection{Examples}
+\subsubsection{Examples for using the HTML write library}
+\label{sec:html-write-examples}
 
 In the following example we will generate a table of Prolog predicates
 we find from the SWI-Prolog help system based on a keyword. The primary
@@ -1689,24 +1702,20 @@ apropos_predicate(Pattern, pred(Name, Arity, Summary)) :-
 
 
 \subsubsection{Remarks on the \pllib{http/html_write} library}
+\label{sec:html-write-remarks}
 
 This library is the result of various attempts to reach at a more
 satisfactory and Prolog-minded way to produce HTML text from a program.
 We have been using Prolog for the generation of web pages in a number of
-projects. Just using format/2 never was a real
-option, generating error-prone HTML from clumsy syntax.  We started
-with a layer on top of format/2, keeping track of the current nesting
-and thus always capable of properly closing the environment.
+projects. Just using format/2 never was not a real option, generating
+error-prone HTML from clumsy syntax. We started with a layer on top of
+format/2, keeping track of the current nesting and thus always capable
+of properly closing the environment.
 
-DCG based translation however naturally exploits Prolog's term-rewriting
-primitives.  If generation fails for whatever reason it is easy to
-produce an alternative document (for example holding an error message).
-
-The approach presented in this library has been used in combination with
-\pllib{http/httpd} in three projects: viewing RDF in a browser,
-selecting fragments from an analysed document and presenting parts of
-the XPCE documentation using a browser. It has proven to be
-able to deal with generating pages quickly and comfortably.
+DCG based translation however, naturally exploits Prolog's
+term-rewriting primitives. If generation fails for whatever reason it is
+easy to produce an alternative document (for example holding an error
+message).
 
 In a future version we will probably define a goal_expansion/2 to do
 compile-time optimisation of the library. Quotation of known text and
@@ -1718,93 +1727,6 @@ that can be done at compile-time.
 \input{httppath}
 \input{htmlhead}
 \input{httppwp}
-
-
-\subsection{Security}
-
-Writing servers is an inherently dangerous job that should be carried out
-with some considerations. You have basically started a program on a
-public terminal and invited strangers to use it. When using the
-interactive server or inetd based server the server runs under your
-privileges. Using CGI scripted it runs with the privileges of your
-web-server. Though it should not be possible to fatally compromise a
-Unix machine using user privileges, getting unconstrained access to the
-system is highly undesirable.
-
-Symbolic languages have an additional handicap in their inherent
-possibilities to modify the running program and dynamically create goals
-(this also applies to the popular perl and java scripting languages).
-Here are some guidelines.
-
-\begin{itemlist}
-    \item [Check your input]
-Hardly anything can go wrong if you check the validity of
-query-arguments before formulating an answer.
-
-    \item [Check filenames]
-If part of the query consists of filenames or directories, check
-them.  This also applies to files you only read.  Passing names as
-\file{/etc/passwd}, but also \file{../../../../../etc/passwd} are
-tried by experienced hackers to learn about the system they want
-to attack.  So, expand provided names using absolute_file_name/[2,3]
-and verify they are inside a folder reserved for the server.  Avoid
-symbolic links from this subtree to the outside world.  The example
-below checks validity of filenames.  The first call ensures proper
-canonisation of the paths to avoid an mismatch due to
-symbolic links or other filesystem ambiguities.
-
-\begin{code}
-check_file(File) :-
-	absolute_file_name('/path/to/reserved/area', Reserved),
-	absolute_file_name(File, Tried),
-	atom_concat(Reserved, _, Tried).
-\end{code}
-
-    \item [Check scripts]
-Should input in any way activate external scripts using shell/1
-or \exam{open(pipe(Command), ...)}, verify the argument once more.
-
-    \item [Check meta-calling]
-\emph{The} attractive situation for you and your attacker is below:
-
-\begin{code}
-reply(Query) :-
-	member(search(Args), Query),
-	member(action=Action, Query),
-	member(arg=Arg, Query),
-	call(Action, Arg).		% NEVER EVER DO THIS!
-\end{code}
-
-All your attacker has to do is specify \arg{Action} as \const{shell}
-and \arg{Arg} as \const{/bin/sh} and he has an uncontrolled shell!
-\end{itemlist}
-
-
-\subsection{Tips and tricks}
-
-\begin{itemlist}
-    \item [URL Locations]
-With an application in mind, it is tempting to make all URL
-locations short and directly connected to the root (\const{/}). This is
-\emph{not} a good idea. It is adviced to have all locations in a server
-below a directory with an informative name. Consider to make the root
-location something that can be changed using a global setting.
-
-    \begin{itemize}
-	\item Page generating code can easily be reused.  Using locations
-	      directly below the root however increases the likelihood
-	      of conflicts.
-	\item Multiple servers can be placed behind the same public
-	      server as explained in \secref{proxy}.  Using a common
-	      and fairly unique root, redirection is much easier and
-	      less likely to lead to conflicts.
-    \end{itemize}
-
-    \item [Debugging]
-Please check the section \url[``Thread-support
-library(threadutil)'']{http://gollem.science.uva.nl/SWI-Prolog/Manual/thutil.html}
-of the SWI-Prolog reference manual.
-\end{itemlist}
 
 
 \section{Transfer encodings}
@@ -1832,24 +1754,122 @@ Note that both \file{http_open.pl} \emph{and} \file{http_chunked.pl}
 must be loaded for http_open/3 to support chunked encoding.
 
 \subsection{The \pllib{http/http_chunked} library}
+\label{sec:http-chunked}
 
 \begin{description}
     \predicate{http_chunked_open}{3}{+RawStream, -DataStream, +Options}
 Create a stream to realise HTTP chunked encoding or decoding. The
 technique is similar to library(zlib), using a Prolog stream as a filter
 on another stream.  See online documentation at
-\url{http://gollem.science.uva.nl/SWI-Prolog/pldoc/} for details.
+\url{http://www.swi-prolog.org/} for details.
 \end{description}
 
 \input{json.tex}
 
+\section{MIME support}
+\label{sec:http-mime}
+
+\input{mimepack.tex}
+
+\section{Security}
+\label{sec:http-security}
+
+Writing servers is an inherently dangerous job that should be carried out
+with some considerations. You have basically started a program on a
+public terminal and invited strangers to use it. When using the
+interactive server or inetd based server the server runs under your
+privileges. Using CGI scripted it runs with the privileges of your
+web-server. Though it should not be possible to fatally compromise a
+Unix machine using user privileges, getting unconstrained access to the
+system is highly undesirable.
+
+Symbolic languages have an additional handicap in their inherent
+possibilities to modify the running program and dynamically create goals
+(this also applies to the popular Perl and PHP scripting languages).
+Here are some guidelines.
+
+\begin{itemlist}
+    \item [Check your input]
+Hardly anything can go wrong if you check the validity of
+query-arguments before formulating an answer.
+
+    \item [Check filenames]
+If part of the query consists of filenames or directories, check them.
+This also applies to files you only read. Passing names as
+\file{/etc/passwd}, but also \file{../../../../../etc/passwd} are tried
+by hackers to learn about the system they want to attack. So, expand
+provided names using absolute_file_name/[2,3] and verify they are inside
+a folder reserved for the server. Avoid symbolic links from this subtree
+to the outside world. The example below checks validity of filenames.
+The first call ensures proper canonisation of the paths to avoid an
+mismatch due to symbolic links or other filesystem ambiguities.
+
+\begin{code}
+check_file(File) :-
+	absolute_file_name('/path/to/reserved/area', Reserved),
+	absolute_file_name(File, Tried),
+	sub_atom(Tried, 0, _, _, Reserved).
+\end{code}
+
+    \item [Check scripts]
+Should input in any way activate external scripts using shell/1 or
+\exam{open(pipe(Command), ...)}, verify the argument once more. Use
+process_create/3 in preference over shell/1 as this function avoids
+stringification of arguments (Unix) or ensures proper quoting of
+arguments (Windows).
+
+    \item [Check meta-calling]
+\emph{The} attractive situation for you and your attacker is below:
+
+\begin{code}
+reply(Query) :-
+	member(search(Args), Query),
+	member(action=Action, Query),
+	member(arg=Arg, Query),
+	call(Action, Arg).		% NEVER EVER DO THIS!
+\end{code}
+
+All your attacker has to do is specify \arg{Action} as \const{shell}
+and \arg{Arg} as \const{/bin/sh} and he has an uncontrolled shell!
+\end{itemlist}
+
+
+\section{Tips and tricks}
+\label{sec:http-tips-and-tricks}
+
+\begin{itemlist}
+    \item [URL Locations]
+With an application in mind, it is tempting to make all URL
+locations short and directly connected to the root (\const{/}). This is
+\emph{not} a good idea. It is adviced to have all locations in a server
+below a directory with an informative name. Consider to make the root
+location something that can be changed using a global setting.
+
+    \begin{itemize}
+	\item Page generating code can easily be reused.  Using locations
+	      directly below the root however increases the likelihood
+	      of conflicts.
+	\item Multiple servers can be placed behind the same public
+	      server as explained in \secref{proxy}.  Using a common
+	      and fairly unique root, redirection is much easier and
+	      less likely to lead to conflicts.
+    \end{itemize}
+
+    \item [Debugging]
+Debugging multi-threaded applications is possible using the graphical
+debugger. This implies requires that the xpce extension package must be
+installed.  Spy-points may be placed using tspy/1.
+\end{itemlist}
+
 \section{Status}
+\label{sec:http-status}
 
 The SWI-Prolog HTTP library is in active use in a large number of
 projects. It is considered one of the SWI-Prolog core libraries that is
 actively maintained and regularly extended with new features. This is
-particularly true for the multi-threaded server. The XPCE and inetd based
-servers are not widely used.
+particularly true for the multi-threaded server. The inetd based server
+may be applicable for infrequent requests where the startup time is less
+relevant.  The XPCE based server is considered obsolete.
 
 This library is by no means complete and you are free to extend it.
 

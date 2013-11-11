@@ -73,7 +73,7 @@ http_server(Goal, Port, _Options) :-
 	(   var(Port)
 	->  new(X, interactive_httpd(M:PlainGoal)),
 	    get(X, address, Port)
-	;   new(X, interactive_httpd(M:PlainGoal, Port))
+	;   new(_, interactive_httpd(M:PlainGoal, Port))
 	).
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -140,13 +140,14 @@ authorise(S) :->
 	(   Allowed == @nil
 	->  true
 	;   get(S, peer, Peer),
-	    get(Allowed, find,
-		message(@arg1, match, Peer),
-		_)
-	->  true
-	;   debug(connection, 'Refused connection from ~w', [Peer]),
-	    free(S),
-	    fail
+	    (	get(Allowed, find,
+		    message(@arg1, match, Peer),
+		    _)
+	    ->  true
+	    ;   debug(connection, 'Refused connection from ~w', [Peer]),
+		free(S),
+		fail
+	    )
 	).
 
 unlink(S) :->

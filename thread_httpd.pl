@@ -53,6 +53,7 @@
 
 :- predicate_options(http_server/2, 2,
 		     [ port(integer),
+		       tcp_socket(any),
 		       workers(positive_integer),
 		       timeout(number),
 		       keep_alive_timeout(number),
@@ -100,6 +101,7 @@ for details.
 %	Options provide a list of options. Defined options are
 %
 %	| port(?Port)	     | -	| Port to listen to		      |
+%	| tcp_socket(+Socket)| -	| If provided, use this socket	      |
 %	| workers(N)	     | 5	| Define the number of worker threads |
 %	| timeout(S)	     | 60	| Max inactivity for reading request  |
 %	| keep_alive_timeout | 2	| Drop Keep-Alive connection timeout  |
@@ -124,6 +126,12 @@ http_server(_Goal, _Options) :-
 
 make_socket(Port, Options0, Options) :-
 	make_socket_hook(Port, Options0, Options), !.
+make_socket(Port, Options0, Options) :-
+	option(tcp_socket(_), Options0), !,
+	make_addr_atom('httpd@', Port, Queue),
+	Options = [ queue(Queue)
+		  | Options0
+		  ].
 make_socket(Port, Options0, Options) :-
 	tcp_socket(Socket),
 	tcp_setopt(Socket, reuseaddr),
@@ -255,7 +263,7 @@ accept_server2(Goal, Options) :-
 	      ;   print_message(error, E),
 		  fail
 	      )
-	  ;   print_message(error, goal_failed(tcp_accept(Socket, Client, Peer)))
+	  ;   print_message(error, goal_failed(tcp_accept(Socket, _, _)))
 	  ).
 
 accept_rethrow_error(http_stop).
@@ -452,7 +460,9 @@ check_keep_alife_connection(In, TMO, Peer, In, Out) :-
 
 %%	done_worker
 %
-%	Called when worker is terminated due to http_workers/2.
+%	Called when worker is terminated  due   to  http_workers/2  or a
+%	(debugging) exception. In  the   latter  case, recreate_worker/2
+%	creates a new worker.
 
 done_worker :-
 	thread_self(Self),
@@ -544,6 +554,14 @@ http_process(Goal, In, Out, Options) :-
 		     ]),
 	next(Connection, Request).
 
+next(switch_protocol(SwitchGoal, _SwitchOptions), Request) :- !,
+        memberchk(pool(client(_Queue, _Goal, In, Out)), Request),
+        (   catch(call(SwitchGoal, In, Out), E,
+		  (   print_message(error, E),
+		      fail))
+	->  true
+	;   http_close_connection(Request)
+	).
 next(spawned(ThreadId), _) :- !,
 	debug(http(spawn), 'Handler spawned to thread ~w', [ThreadId]).
 next(Connection, Request) :-
@@ -624,11 +642,13 @@ wrap_spawned(CGI, Goal) :-
 %
 %	Lazy  creation  of  worker-pools  for   the  HTTP  server.  This
 %	predicate calls the hook http:create_pool/1.   If the hook fails
-%	it creates a default pool of size 10.   This should suffice most
-%	typical usecases.
+%	it creates a default pool of size   10. This should suffice most
+%	typical usecases. Note that we  get   a  permission error if the
+%	pool is already created.  We can ignore this.
 
 create_pool(Pool) :-
-	http:create_pool(Pool), !.
+	E = error(permission_error(create, thread_pool, Pool), _),
+	catch(http:create_pool(Pool), E, true).
 create_pool(Pool) :-
 	print_message(informational, httpd(created_pool(Pool))),
 	thread_pool_create(Pool, 10, []).

@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2009-2010, University of Amsterdam
+    Copyright (C): 2009-2013, University of Amsterdam
 			      VU University Amsterdam
 
     This library is free software; you can redistribute it and/or
@@ -337,7 +337,11 @@ cgi_property(term_t cgi, term_t prop)
   }
 
 out:
-  PL_release_stream(s);
+  if ( !PL_release_stream(s) )
+  { if ( PL_exception(0) )
+      PL_clear_exception();
+  }
+
   return rc;
 }
 

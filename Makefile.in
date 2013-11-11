@@ -9,11 +9,10 @@ DOC=http
 include @srcdir@/common.mk
 CFLAGS+= -I.
 .SUFFIXES: .txt
+PKGPLLIBDIR=$(PLLIBDIR)/http
+EXDIR=$(PKGEXDIR)/http
 
 include ../Makefile.defs
-
-LIBDIR=$(PLLIBDIR)/http
-EXDIR=$(PKGEXDIR)/http
 
 STREAMOBJ=	http_stream.o
 JSONOBJ=	json.o
@@ -33,14 +32,13 @@ install:	$(LIBSRCPL) $(SOLIBS)
 		for f in $(SOLIBS); do \
                   $(INSTALL_PROGRAM) $$f $(DESTDIR)$(SOLIBDIR); \
                 done
-		rm -f $(DESTDIR)$(PLBASE)/$(SOLIB)/$(INSTALL_PLARCH)/http_chunked.@SO@
-		mkdir -p $(DESTDIR)$(LIBDIR)
-		mkdir -p $(DESTDIR)$(LIBDIR)/web/icons
-		mkdir -p $(DESTDIR)$(LIBDIR)/web/css
-		$(INSTALL_DATA) $(LIBSRCPL) $(DESTDIR)$(LIBDIR)
-		$(INSTALL_DATA) $(srcdir)/README $(DESTDIR)$(LIBDIR)/README$(TXTEXT)
-		$(INSTALL_DATA) $(srcdir)/web/icons/*.png $(DESTDIR)$(LIBDIR)/web/icons
-		$(INSTALL_DATA) $(srcdir)/web/css/*.css $(DESTDIR)$(LIBDIR)/web/css
+		mkdir -p $(DESTDIR)$(PKGPLLIBDIR)
+		mkdir -p $(DESTDIR)$(PKGPLLIBDIR)/web/icons
+		mkdir -p $(DESTDIR)$(PKGPLLIBDIR)/web/css
+		$(INSTALL_DATA) $(LIBPL) $(DESTDIR)$(PKGPLLIBDIR)
+		$(INSTALL_DATA) README $(DESTDIR)$(PKGPLLIBDIR)/README$(TXTEXT)
+		$(INSTALL_DATA) web/icons/*.png $(DESTDIR)$(PKGPLLIBDIR)/web/icons
+		$(INSTALL_DATA) web/css/*.css $(DESTDIR)$(PKGPLLIBDIR)/web/css
 		$(MKPKGINDEX)
 		$(MKINDEX)
 
@@ -63,7 +61,7 @@ install-examples::
 		(cd $(srcdir)/examples && $(INSTALL_PROGRAM) $(EXAMPLEEXE) $(DESTDIR)$(EXDIR))
 
 uninstall::
-		(cd $(LIBDIR) && rm -f $(LIBPL))
+		(cd $(PKGPLLIBDIR) && rm -f $(LIBPL))
 		$(PL) -f none -g make -t halt
 
 check::
@@ -78,6 +76,7 @@ check::
 TEXEXTRA=	post.tex json.tex httplog.tex httppath.tex htmlhead.tex \
 		httpsession.tex httpdispatch.tex httpdirindex.tex httppwp.tex \
 		httpopen.tex httphost.tex httpopenid.tex jswrite.tex \
+<<<<<<< HEAD
 		httpfiles.tex
 $(TEX):		$(TEXEXTRA) figs/httpserver.eps figs/httpserver.pd
 
@@ -88,6 +87,10 @@ figs/httpserver.eps:
 figs/httpserver.pd:
 		mkdir -p figs
 		cp $(srcdir)/figs/httpserver.pd figs
+=======
+		httpfiles.tex httpcors.tex mimepack.tex httpunixdaemon.tex
+$(TEX):		$(TEXEXTRA)
+>>>>>>> 8e1667b73182fdc0b6ece508b9b93f8fc894694f
 
 json.tex:	$(srcdir)/json.pl $(srcdir)/json_convert.pl $(srcdir)/http_json.pl
 
@@ -127,9 +130,20 @@ httpdirindex.tex: $(srcdir)/http_dirindex.pl
 httppwp.tex:	$(srcdir)/http_pwp.pl
 		$(PLTOTEX) --subsection 'library(http/http_pwp)'
 
+<<<<<<< HEAD
 jswrite.tex:	$(srcdir)/js_write.pl
 		$(PLTOTEX) --subsection 'library(http/js_write)'
 
+=======
+httpunixdaemon.tex:	http_unix_daemon.pl
+		$(PLTOTEX) --subsubsection 'library(http/http_unix_daemon)'
+
+jswrite.tex:	js_write.pl
+		$(PLTOTEX) --subsection 'library(http/js_write)'
+
+mimepack.tex:	mimepack.pl
+		$(PLTOTEX) --subsection 'library(http/mimepack)'
+>>>>>>> 8e1667b73182fdc0b6ece508b9b93f8fc894694f
 
 ################################################################
 # Clean

@@ -3,6 +3,7 @@
 *.a
 *.so
 *.dylib
+*.dSYM
 *.dll
 *.exp
 *.ilk
@@ -49,3 +50,5 @@ httpopenid.tex
 httpfiles.tex
 jswrite.tex
 httpcors.tex
+mimepack.tex
+httpunixdaemon.tex

@@ -1,11 +1,9 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2007-2010, University of Amsterdam,
+    Copyright (C): 2007-2013, University of Amsterdam,
 			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
@@ -40,30 +38,32 @@
 
 					% low-level primitives
 	    openid_verify/2,		% +Options, +Request
-	    openid_authenticate/4,	% +Request, -Server, -User, -ReturnTo
+	    openid_authenticate/4,	% +Request, -Server, -Identity, -ReturnTo
 	    openid_associate/3,		% +OpenIDServer, -Handle, -Association
-	    openid_server/2,		% +Request
-	    openid_grant/1,		% +Request
+	    openid_associate/4,		% +OpenIDServer, -Handle, -Association,
+					% +Options
+	    openid_server/2,		% +Options, +Request
 	    openid_server/3,		% ?OpenIDLogin, ?OpenID, ?Server
+	    openid_grant/1,		% +Request
 
 	    openid_login_form//2,	% +ReturnTo, +Options, //
 
 	    openid_current_host/3	% +Request, -Host, -Port
 	  ]).
 :- use_module(library(http/http_open)).
-:- use_module(library(http/http_client)).
 :- use_module(library(http/html_write)).
 :- use_module(library(http/http_parameters)).
-:- use_module(library(http/http_wrapper)).
-:- use_module(library(http/thread_httpd)).
 :- use_module(library(http/http_dispatch)).
 :- use_module(library(http/http_session)).
 :- use_module(library(http/http_host)).
 :- use_module(library(http/http_path)).
 :- use_module(library(http/html_head)).
-:- use_module(library(http/http_server_files)).
+:- use_module(library(http/http_server_files), []).
+:- use_module(library(http/yadis)).
+:- use_module(library(http/ax)).
 :- use_module(library(utf8)).
 :- use_module(library(error)).
+:- use_module(library(xpath)).
 :- use_module(library(sgml)).
 :- use_module(library(uri)).
 :- use_module(library(occurs)).
@@ -72,13 +72,26 @@
 :- use_module(library(record)).
 :- use_module(library(option)).
 :- use_module(library(sha)).
-:- use_module(library(socket)).
 :- use_module(library(lists)).
+:- use_module(library(settings)).
 
-:- predicate_options(openid_login_form/4, 2, [action(atom)]).
-:- predicate_options(openid_server/2, 1, [expires_in(any)]).
-:- predicate_options(openid_user/3, 3, [login_url(atom)]).
-:- predicate_options(openid_verify/2, 1, [return_to(atom), trust_root(atom)]).
+:- predicate_options(openid_login_form/4, 2,
+		     [ action(atom),
+		       buttons(list),
+		       show_stay(boolean)
+		     ]).
+:- predicate_options(openid_server/2, 1,
+		     [ expires_in(any)
+		     ]).
+:- predicate_options(openid_user/3, 3,
+		     [ login_url(atom)
+		     ]).
+:- predicate_options(openid_verify/2, 1,
+		     [ return_to(atom),
+		       trust_root(atom),
+		       realm(atom),
+		       ax(any)
+		     ]).
 
 /** <module> OpenID consumer and server library
 
@@ -141,20 +154,23 @@ http:location(openid, root(openid), [priority(-100)]).
 %
 %	Call hook on the OpenID management library.  Defined hooks are:
 %
-%		* login(+OpenID)
-%		Consider OpenID logged in.
+%	  * login(+OpenID)
+%	  Consider OpenID logged in.
 %
-%		* logout(+OpenID)
-%		Logout OpenID
+%	  * logout(+OpenID)
+%	  Logout OpenID
 %
-%		* logged_in(?OpenID)
-%		True if OpenID is logged in
+%	  * logged_in(?OpenID)
+%	  True if OpenID is logged in
 %
-%		* grant(+Request, +Options)
-%		Server: Reply positive on OpenID
+%	  * grant(+Request, +Options)
+%	  Server: Reply positive on OpenID
 %
-%		* trusted(+OpenID, +Server)
-%		True if Server is a trusted OpenID server
+%	  * trusted(+OpenID, +Server)
+%	  True if Server is a trusted OpenID server
+%
+%	  * ax(Values)
+%	  Called if the server provided AX attributes
 
 :- multifile
 	openid_hook/1.			% +Action
@@ -169,10 +185,12 @@ http:location(openid, root(openid), [priority(-100)]).
 %	OpenID is already associated, this association is first removed.
 
 openid_login(OpenID) :-
-	openid_hook(login(OpenID)), !.
+	openid_hook(login(OpenID)), !,
+	handle_stay_signed_in(OpenID).
 openid_login(OpenID) :-
 	openid_logout(_),
-	http_session_assert(openid(OpenID)).
+	http_session_assert(openid(OpenID)),
+	handle_stay_signed_in(OpenID).
 
 %%	openid_logout(+OpenID) is det.
 %
@@ -205,46 +223,75 @@ openid_logged_in(OpenID) :-
 %	allow  an  HTTP  handler  that  requires    a   valid  login  to
 %	use the transparent code below.
 %
-%	==
-%	handler(Request) :-
+%	  ==
+%	  handler(Request) :-
 %		openid_user(Request, OpenID, []),
 %		...
-%	==
+%	  ==
 %
 %	If the user is not yet logged on a sequence of redirects will
 %	follow:
 %
-%		1. Show a page for login (default: page /openid/login),
-%		   predicate reply_openid_login/1)
-%		2. Redirect to OpenID server to validate
-%		3. Redirect to validation
+%	  1. Show a page for login (default: page /openid/login),
+%	     predicate reply_openid_login/1)
+%	  2. By default, the OpenID login page is a form that is
+%	     submitted to the =verify=, which calls openid_verify/2.
+%	  3. openid_verify/2 does the following:
+%	     - Find the OpenID claimed identity and server
+%	     - Associate to the OpenID server
+%	     - redirects to the OpenID server for validation
+%	  4. The OpenID server will redirect here with the authetication
+%	     information.  This is handled by openid_authenticate/4.
 %
 %	Options:
 %
-%		* login_url(Login)
-%		(Local) URL of page to enter OpenID information. Default
-%		is =|/openid/login|=.
+%	  * login_url(Login)
+%	    (Local) URL of page to enter OpenID information. Default
+%	    is the handler for openid_login_page/1
 %
 %	@see openid_authenticate/4 produces errors if login is invalid
 %	or cancelled.
 
-:- http_handler(openid(login),  openid_login_page, []).
-:- http_handler(openid(verify), openid_verify([]), []).
+:- http_handler(openid(login),	      openid_login_page,   [priority(-10)]).
+:- http_handler(openid(verify),	      openid_verify([]),   []).
+:- http_handler(openid(authenticate), openid_authenticate, []).
+:- http_handler(openid(xrds),	      openid_xrds,	   []).
 
 openid_user(_Request, OpenID, _Options) :-
 	openid_logged_in(OpenID), !.
-openid_user(Request, User, _Options) :-
-	openid_authenticate(Request, _OpenIdServer, OpenID, _ReturnTo), !,
-	openid_server(User, OpenID, _),
-	openid_login(User).
 openid_user(Request, _OpenID, Options) :-
-	http_location_by_id(openid_login_page, LoginURL),
-	option(login_url(Login), Options, LoginURL),
+	http_link_to_id(openid_login_page, [], DefLoginPage),
+	option(login_url(LoginPage), Options, DefLoginPage),
 	current_url(Request, Here),
-	uri_normalized(Login, Here, AbsLogin),
-	redirect_browser(AbsLogin,
+	redirect_browser(LoginPage,
 			 [ 'openid.return_to' = Here
 			 ]).
+
+%%	openid_xrds(Request)
+%
+%	Reply to a request  for   "Discovering  OpenID Relying Parties".
+%	This may happen as part of  the provider verification procedure.
+%	The  provider  will   do   a    Yadis   discovery   request   on
+%	=openid.return=  or  =openid.realm=.  This  is    picked  up  by
+%	openid_user/3, pointing the provider to   openid(xrds).  Now, we
+%	reply with the locations marked =openid=  and the locations that
+%	have actually been doing OpenID validations.
+
+openid_xrds(Request) :-
+	http_link_to_id(openid_authenticate, [], Autheticate),
+	public_url(Request, Autheticate, Public),
+	format('Content-type: text/xml\n\n'),
+	format('<?xml version="1.0" encoding="UTF-8"?>\n'),
+	format('<xrds:XRDS\n'),
+	format('    xmlns:xrds="xri://$xrds"\n'),
+	format('    xmlns="xri://$xrd*($v*2.0)">\n'),
+	format('  <XRD>\n'),
+	format('    <Service>\n'),
+	format('      <Type>http://specs.openid.net/auth/2.0/return_to</Type>\n'),
+	format('      <URI>~w</URI>\n', [Public]),
+	format('    </Service>\n'),
+	format('  </XRD>\n'),
+	format('</xrds:XRDS>\n').
 
 
 %%	openid_login_page(+Request) is det.
@@ -255,39 +302,92 @@ openid_user(Request, _OpenID, Options) :-
 %	handler for =|/openid/login|= using http_handler/3.
 
 openid_login_page(Request) :-
+	http_open_session(_, []),
 	http_parameters(Request,
-			[ 'openid.return_to'(ReturnTo, [])
+			[ 'openid.return_to'(Target, [])
 			]),
 	reply_html_page([ title('OpenID login')
 			],
-			[ \openid_login_form(ReturnTo, [])
+			[ \openid_login_form(Target, [])
 			]).
 
 %%	openid_login_form(+ReturnTo, +Options)// is det.
 %
 %	Create the OpenID  form.  This  exported   as  a  seperate  DCG,
 %	allowing applications to redefine /openid/login   and reuse this
-%	part of the page.
+%	part of the page.  Options processed:
+%
+%	  - action(Action)
+%	  URL of action to call.  Default is the handler calling
+%	  openid_verify/1.
+%	  - buttons(+Buttons)
+%	  Buttons is a list of =img= structures where the =href=
+%	  points to an OpenID 2.0 endpoint.  These buttons are
+%	  displayed below the OpenID URL field.  Clicking the
+%	  button sets the URL field and submits the form.  Requires
+%	  Javascript support.
+%	  - show_stay(+Boolean)
+%	  If =true=, show a checkbox that allows the user to stay
+%	  logged on.
 
 openid_login_form(ReturnTo, Options) -->
-	{ option(action(Action), Options, verify)
+	{ http_link_to_id(openid_verify, [], VerifyLocation),
+	  option(action(Action), Options, VerifyLocation),
+	  http_session_retractall(openid(_)),
+	  http_session_retractall(openid_login(_,_,_,_)),
+	  http_session_retractall(ax(_))
 	},
-	html(div(class('openid-login'),
+	html(div([ class('openid-login')
+		 ],
 		 [ \openid_title,
 		   form([ name(login),
+			  id(login),
 			  action(Action),
 			  method('GET')
 			],
 			[ \hidden('openid.return_to', ReturnTo),
 			  div([ input([ class('openid-input'),
 					name(openid_url),
-					size(30)
+					id(openid_url),
+					size(30),
+					placeholder('Your OpenID URL')
 				      ]),
 				input([ type(submit),
 					value('Verify!')
 				      ])
-			      ])
+			      ]),
+			  \buttons(Options),
+			  \stay_logged_on(Options)
 			])
+		 ])).
+
+stay_logged_on(Options) -->
+	{ option(show_stay(true), Options) }, !,
+	html(div(class('openid-stay'),
+		 [ input([ type(checkbox), name(stay), value(yes)]),
+		   'Stay signed in'
+		 ])).
+stay_logged_on(_) --> [].
+
+buttons(Options) -->
+	{ option(buttons(Buttons), Options),
+	  Buttons \== []
+	},
+	html(div(class('openid-buttons'),
+		 [ 'Sign in with '
+		 | \prelogin_buttons(Buttons)
+		 ])).
+buttons(_) --> [].
+
+prelogin_buttons([]) --> [].
+prelogin_buttons([H|T]) --> prelogin_button(H), prelogin_buttons(T).
+
+prelogin_button(img(Attrs)) -->
+	{ select_option(href(HREF), Attrs, RestAttrs) },
+	html(img([ onClick('javascript:{$("#openid_url").val("'+HREF+'");'+
+			   '$("form#login").submit();}'
+			  )
+		 | RestAttrs
 		 ])).
 
 
@@ -304,40 +404,90 @@ openid_login_form(ReturnTo, Options) -->
 %	user's  browser  to  the  OpenID  server,  providing  the  extra
 %	openid.X name-value pairs. Options is,  against the conventions,
 %	placed in front of the Request   to allow for smooth cooperation
-%	with http_dispatch.pl.
+%	with http_dispatch.pl.  Options processes:
 %
-%	The OpenId server will redirect to the openid.return_to URL.
+%	  * return_to(+URL)
+%	  Specifies where the OpenID provider should return to.
+%	  Normally, that is the current location.
+%	  * trust_root(+URL)
+%	  Specifies the =openid.trust_root= attribute.  Defaults to
+%	  the root of the current server (i.e., =|http://host[.port]/|=).
+%	  * realm(+URL)
+%	  Specifies the =openid.realm= attribute.  Default is the
+%	  =trust_root=.
+%	  * ax(+Spec)
+%	  Request the exchange of additional attributes from the
+%	  identity provider.  See http_ax_attributes/2 for details.
+%
+%	The OpenId server will redirect to the =openid.return_to= URL.
 %
 %	@throws	http_reply(moved_temporary(Redirect))
 
 openid_verify(Options, Request) :-
 	http_parameters(Request,
 			[ openid_url(URL, [length>1]),
-			  'openid.return_to'(ReturnTo0, [optional(true)])
+			  'openid.return_to'(ReturnTo0, [optional(true)]),
+			  stay(Stay, [optional(true), default(no)])
 			]),
-	(   option(return_to(ReturnTo1), Options)		% Option
+	(   option(return_to(ReturnTo1), Options)	% Option
 	->  current_url(Request, CurrentLocation),
 	    global_url(ReturnTo1, CurrentLocation, ReturnTo)
 	;   nonvar(ReturnTo0)
-	->  ReturnTo = ReturnTo0				% Form-data
+	->  ReturnTo = ReturnTo0			% Form-data
 	;   current_url(Request, CurrentLocation),
-	    ReturnTo = CurrentLocation				% Current location
+	    ReturnTo = CurrentLocation			% Current location
 	),
-	current_root_url(Request, CurrentRoot),
+	public_url(Request, /, CurrentRoot),
 	option(trust_root(TrustRoot), Options, CurrentRoot),
-	openid_resolve(URL, OpenIDLogin, OpenID, Server),
+	option(realm(Realm), Options, TrustRoot),
+	openid_resolve(URL, OpenIDLogin, OpenID, Server, ServerOptions),
 	trusted(OpenID, Server),
 	openid_associate(Server, Handle, _Assoc),
-	assert_openid(OpenIDLogin, OpenID, Server),
-	redirect_browser(Server, [ 'openid.mode'         = checkid_setup,
+	assert_openid(OpenIDLogin, OpenID, Server, ReturnTo),
+	stay(Stay),
+	option(ns(NS), Options, 'http://specs.openid.net/auth/2.0'),
+	(   realm_attribute(NS, RealmAttribute)
+	->  true
+	;   domain_error('openid.ns', NS)
+	),
+	ax_options(ServerOptions, Options, AXAttrs),
+	http_link_to_id(openid_authenticate, [], AuthenticateLoc),
+	public_url(Request, AuthenticateLoc, Authenticate),
+	redirect_browser(Server, [ 'openid.ns'		 = NS,
+				   'openid.mode'         = checkid_setup,
 				   'openid.identity'     = OpenID,
+				   'openid.claimed_id'   = OpenID,
 				   'openid.assoc_handle' = Handle,
-				   'openid.return_to'    = ReturnTo,
-				   'openid.trust_root'   = TrustRoot
+				   'openid.return_to'    = Authenticate,
+				   RealmAttribute        = Realm
+				 | AXAttrs
 				 ]).
 
+realm_attribute('http://specs.openid.net/auth/2.0', 'openid.realm').
+realm_attribute('http://openid.net/signon/1.1',     'openid.trust_root').
 
-%%	assert_openid(+OpenIDLogin, +OpenID, +Server) is det.
+
+%%	stay(+Response)
+%
+%	Called if the user  ask  to  stay   signed  in.  This  is called
+%	_before_ control is handed to the   OpenID server. It leaves the
+%	data openid_stay_signed_in(true) in the current session.
+
+stay(yes) :- !,
+	http_session_assert(openid_stay_signed_in(true)).
+stay(_).
+
+%%	handle_stay_signed_in(+OpenID)
+%
+%	Handle stay_signed_in option after the user has logged on
+
+handle_stay_signed_in(OpenID) :-
+	http_session_retract(openid_stay_signed_in(true)), !,
+	http_set_session(timeout(0)),
+	ignore(openid_hook(stay_signed_in(OpenID))).
+handle_stay_signed_in(_).
+
+%%	assert_openid(+OpenIDLogin, +OpenID, +Server, +Target) is det.
 %
 %	Associate the OpenID  as  typed  by   the  user,  the  OpenID as
 %	validated by the Server with the current HTTP session.
@@ -345,8 +495,12 @@ openid_verify(Options, Request) :-
 %	@param OpenIDLogin Canonized OpenID typed by user
 %	@param OpenID OpenID verified by Server.
 
-assert_openid(OpenIDLogin, OpenID, Server) :-
-	http_session_assert(openid_login(OpenIDLogin, OpenID, Server)).
+assert_openid(OpenIDLogin, OpenID, Server, Target) :-
+	openid_identifier_select_url(OpenIDLogin),
+	openid_identifier_select_url(OpenID), !,
+	http_session_assert(openid_login(Identity, Identity, Server, Target)).
+assert_openid(OpenIDLogin, OpenID, Server, Target) :-
+	http_session_assert(openid_login(OpenIDLogin, OpenID, Server, Target)).
 
 %%	openid_server(?OpenIDLogin, ?OpenID, ?Server) is nondet.
 %
@@ -358,31 +512,49 @@ assert_openid(OpenIDLogin, OpenID, Server) :-
 %	@param Server URL of the OpenID server
 
 openid_server(OpenIDLogin, OpenID, Server) :-
+	openid_server(OpenIDLogin, OpenID, Server, _Target).
+
+openid_server(OpenIDLogin, OpenID, Server, Target) :-
 	http_in_session(_),
-	http_session_data(openid_login(OpenIDLogin, OpenID, Server)), !.
+	http_session_data(openid_login(OpenIDLogin, OpenID, Server, Target)), !.
 
 
-%%	current_url(+Request, -Root) is det.
-%%	current_root_url(+Request, -Root) is det.
+%%	public_url(+Request, +Path, -URL) is det.
 %
-%	Return URL of current request or current root.
+%	True when URL is a publically useable  URL that leads to Path on
+%	the current server.
 
-current_root_url(Request, Root) :-
+public_url(Request, Path, URL) :-
 	openid_current_host(Request, Host, Port),
+	setting(http:public_scheme, Scheme),
+	set_port(Scheme, Port, AuthC),
 	uri_authority_data(host, AuthC, Host),
-	uri_authority_data(port, AuthC, Port),
 	uri_authority_components(Auth, AuthC),
-	uri_data(scheme, Components, http),
+	uri_data(scheme, Components, Scheme),
 	uri_data(authority, Components, Auth),
-	uri_data(path, Components, /),
-	uri_components(Root, Components).
+	uri_data(path, Components, Path),
+	uri_components(URL, Components).
+
+set_port(Scheme, Port, _) :-
+	scheme_port(Scheme, Port), !.
+set_port(_, Port, AuthC) :-
+	uri_authority_data(port, AuthC, Port).
+
+scheme_port(http, 80).
+scheme_port(https, 443).
+
+
+%%	current_url(+Request, -URL) is det.
+%
+%	True when URL is an absolute URL for the current request.
 
 current_url(Request, URL) :-
 	openid_current_host(Request, Host, Port),
+	setting(http:public_scheme, Scheme),
 	option(request_uri(RequestURI), Request),
-	(   Port == 80
-	->  format(atom(URL), 'http://~w~w', [Host, RequestURI])
-	;   format(atom(URL), 'http://~w:~w~w', [Host, Port, RequestURI])
+	(   scheme_port(Scheme, Port)
+	->  format(atom(URL), '~w://~w~w', [Scheme, Host, RequestURI])
+	;   format(atom(URL), '~w://~w:~w~w', [Scheme, Host, Port, RequestURI])
 	).
 
 
@@ -420,7 +592,7 @@ redirect_browser(URL, FormExtra) :-
 		 *	       RESOLVE		*
 		 *******************************/
 
-%%	openid_resolve(+URL, -OpenIDOrig, -OpenID, -Server)
+%%	openid_resolve(+URL, -OpenIDOrig, -OpenID, -Server, -ServerOptions)
 %
 %	True if OpenID is the claimed  OpenID   that  belongs to URL and
 %	Server is the URL of the  OpenID   server  that  can be asked to
@@ -430,23 +602,37 @@ redirect_browser(URL, FormExtra) :-
 %	@param	OpenIDOrig Canonized OpenID typed by user
 %	@param	OpenID Possibly delegated OpenID
 %	@param  Server OpenID server that must validate OpenID
-%
+%	@param	ServerOptions provides additional XRDS information about
+%		the server.  Currently supports xrds_types(Types).
 %	@tbd	Implement complete URL canonization as defined by the
 %		OpenID 2.0 proposal.
 
-openid_resolve(URL, OpenID0, OpenID, Server) :-
+openid_resolve(URL, OpenID, OpenID, Server, [xrds_types(Types)]) :-
+	xrds_dom(URL, DOM),
+	xpath(DOM, //(_:'Service'), Service),
+	findall(Type, xpath(Service, _:'Type'(text), Type), Types),
+	memberchk('http://specs.openid.net/auth/2.0/server', Types),
+	xpath(Service, _:'URI'(text), Server), !,
+	debug(openid(yadis), 'Yadis: server: ~q, types: ~q', [Server, Types]),
+	(   xpath(Service, _:'LocalID'(text), OpenID)
+	->  true
+	;   openid_identifier_select_url(OpenID)
+	).
+openid_resolve(URL, OpenID0, OpenID, Server, []) :-
 	debug(openid(resolve), 'Opening ~w ...', [URL]),
-	http_open(URL, Stream,
-		  [ final_url(OpenID0)
-		  ]),
 	dtd(html, DTD),
-	call_cleanup(load_structure(Stream, Term,
-				    [ dtd(DTD),
-				      dialect(sgml),
-				      shorttag(false),
-				      syntax_errors(quiet)
-				    ]),
-		     close(Stream)),
+	setup_call_cleanup(
+	    http_open(URL, Stream,
+		      [ final_url(OpenID0),
+			cert_verify_hook(ssl_verify)
+		      ]),
+	    load_structure(Stream, Term,
+			   [ dtd(DTD),
+			     dialect(sgml),
+			     shorttag(false),
+			     syntax_errors(quiet)
+			   ]),
+	    close(Stream)),
 	debug(openid(resolve), 'Scanning HTML document ...', [URL]),
 	contains_term(element(head, _, Head), Term),
 	(   link(Head, 'openid.server', Server)
@@ -460,6 +646,21 @@ openid_resolve(URL, OpenID0, OpenID, Server) :-
 	    debug(openid(resolve), 'OpenID = ~q', [OpenID])
 	).
 
+openid_identifier_select_url(
+    'http://specs.openid.net/auth/2.0/identifier_select').
+
+:- public ssl_verify/5.
+
+%%	ssl_verify(+SSL, +ProblemCert, +AllCerts, +FirstCert, +Error)
+%
+%	Accept all certificates. We do not care  too much. Only the user
+%	cares s/he is not entering her  credentials with a spoofed side.
+%	As we redirect, the browser will take care of this.
+
+ssl_verify(_SSL,
+	   _ProblemCertificate, _AllCertificates, _FirstCertificate,
+	   _Error).
+
 
 link(DOM, Type, Target) :-
 	sub_term(element(link, Attrs, []), DOM),
@@ -470,6 +671,24 @@ link(DOM, Type, Target) :-
 		 /*******************************
 		 *	   AUTHENTICATE		*
 		 *******************************/
+
+%%	openid_authenticate(+Request)
+%
+%	HTTP handler when redirected back from the OpenID provider.
+
+openid_authenticate(Request) :-
+	memberchk(accept(Accept), Request),
+	Accept = [media(application/'xrds+xml',_,_,_)], !,
+	http_link_to_id(openid_xrds, [], XRDSLocation),
+	http_absolute_uri(XRDSLocation, XRDSServer),
+	debug(openid(yadis), 'Sending XRDS server: ~q', [XRDSServer]),
+	format('X-XRDS-Location: ~w\n', [XRDSServer]),
+	format('Content-type: text/plain\n\n').
+openid_authenticate(Request) :-
+	openid_authenticate(Request, _OpenIdServer, OpenID, _ReturnTo),
+	openid_server(User, OpenID, _, Target),
+	openid_login(User),
+	redirect_browser(Target, []).
 
 
 %%	openid_authenticate(+Request, -Server:url, -OpenID:url,
@@ -504,7 +723,8 @@ openid_authenticate(Request, OpenIdServer, Identity, ReturnTo) :-
 	;   Mode == cancel
 	->  throw(openid(cancel))
 	;   Mode == id_res
-	->  http_parameters(Request,
+	->  debug(openid(authenticate), 'Mode=id_res, validating response', []),
+	    http_parameters(Request,
 			    [ 'openid.identity'(Identity, []),
 			      'openid.assoc_handle'(Handle, []),
 			      'openid.return_to'(ReturnTo, []),
@@ -527,16 +747,16 @@ openid_authenticate(Request, OpenIdServer, Identity, ReturnTo) :-
 			 Form,
 			 SignedPairs),
 	    (	openid_associate(OpenIdServer, Handle, Assoc)
-	    ->  signature(SignedPairs, Assoc, Sig)
-	    ;	existence_error(assoc_handle, Handle)
+	    ->  signature(SignedPairs, Assoc, Sig),
+		atom_codes(Base64Signature, Base64SigCodes),
+		phrase(base64(Signature), Base64SigCodes),
+		(   Sig == Signature
+		->  true
+		;   throw(openid(signature_mismatch))
+		)
+	    ;	check_authentication(Request, Form)
 	    ),
-
-	    atom_codes(Base64Signature, Base64SigCodes),
-	    phrase(base64(Signature), Base64SigCodes),
-	    (	Sig == Signature
-	    ->	true
-	    ;	throw(openid(signature_mismatch))
-	    )
+	    ax_store(Form)
 	).
 
 %%	signed_pairs(+FieldNames, +Pairs:list(Field-Value),
@@ -580,6 +800,75 @@ check_obligatory_fields(Fields) :-
 obligatory_field(identity).
 
 
+%%	check_authentication(+Request, +Form) is semidet.
+%
+%	Implement the stateless verification method.   This seems needed
+%	for stackexchange.com, which provides the   =res_id=  with a new
+%	association handle.
+
+check_authentication(_Request, Form) :-
+	openid_server(_OpenIDLogin, _OpenID, Server),
+	debug(openid(check_authentication),
+	      'Using stateless verification with ~q form~n~q', [Server, Form]),
+	select('openid.mode' = _, Form, Form1),
+	setup_call_cleanup(
+	    http_open(Server, In,
+		      [ post(form([ 'openid.mode' = check_authentication
+				  | Form1
+				  ])),
+			cert_verify_hook(ssl_verify)
+		      ]),
+	    read_stream_to_codes(In, Reply),
+	    close(In)),
+	debug(openid(check_authentication),
+	      'Reply: ~n~s~n', [Reply]),
+	key_values_data(Pairs, Reply),
+	forall(member(invalidate_handle-Handle, Pairs),
+	       retractall(association(_, Handle, _))),
+	memberchk(is_valid-true, Pairs).
+
+
+		 /*******************************
+		 *	    AX HANDLING		*
+		 *******************************/
+
+%%	ax_options(+ServerOptions, +Options, +AXAttrs) is det.
+%
+%	True when AXAttrs is a  list   of  additional attribute exchange
+%	options to add to the OpenID redirect request.
+
+ax_options(ServerOptions, Options, AXAttrs) :-
+	option(ax(Spec), Options),
+	option(xrds_types(Types), ServerOptions),
+	memberchk('http://openid.net/srv/ax/1.0', Types), !,
+	http_ax_attributes(Spec, AXAttrs),
+	debug(openid(ax), 'AX attributes: ~q', [AXAttrs]).
+ax_options(_, _, []) :-
+	debug(openid(ax), 'AX: not supported', []).
+
+%%	ax_store(+Form)
+%
+%	Extract reported AX data and  store   this  into the session. If
+%	there is a non-empty list of exchanged values, this calls
+%
+%	    openid_hook(ax(Values))
+%
+%	If this hook fails, Values are added   to the session data using
+%	http_session_assert(ax(Values)).
+
+ax_store(Form) :-
+	debug(openid(ax), 'Form: ~q', [Form]),
+	ax_form_attributes(Form, Values),
+	debug(openid(ax), 'AX: ~q', [Values]),
+	(   Values \== []
+	->  (   openid_hook(ax(Values))
+	    ->  true
+	    ;   http_session_assert(ax(Values))
+	    )
+	;   true
+	).
+
+
 		 /*******************************
 		 *	   OPENID SERVER	*
 		 *******************************/
@@ -619,14 +908,16 @@ associate_server(Request, Form, Options) :-
 	base64_btwoc(P, P64),
 	base64_btwoc(G, G64),
 	base64_btwoc(CPX, CPX64),
-	dh_x(P, Y),			% Our secret
+	Y is 1+random(P-1),		% Our secret
 	DiffieHellman is powm(CPX, Y, P),
 	btwoc(DiffieHellman, DHBytes),
-	sha_hash(DHBytes, SHA1, [algorithm(sha1)]),
+	signature_algorithm(SessionType, SHA_Algo),
+	sha_hash(DHBytes, SHA1, [encoding(octet), algorithm(SHA_Algo)]),
 	CPY is powm(G, Y, P),
 	base64_btwoc(CPY, CPY64),
-	new_assoc_handle(Handle),
-	random_bytes(20, MacKey),
+	mackey_bytes(SessionType, MacBytes),
+	new_assoc_handle(MacBytes, Handle),
+	random_bytes(MacBytes, MacKey),
 	xor_codes(MacKey, SHA1, EncKey),
 	phrase(base64(EncKey), Base64EncKey),
 	DefExpriresIn is 24*3600,
@@ -652,9 +943,11 @@ associate_server(Request, Form, Options) :-
 			Text),
 	format('Content-type: text/plain~n~n~s', [Text]).
 
+mackey_bytes('DH-SHA1',   20).
+mackey_bytes('DH-SHA256', 32).
 
-new_assoc_handle(Handle) :-
-	random_bytes(20, Bytes),
+new_assoc_handle(Length, Handle) :-
+	random_bytes(Length, Bytes),
 	phrase(base64(Bytes), HandleCodes),
 	atom_codes(Handle, HandleCodes).
 
@@ -829,9 +1122,10 @@ signature(Pairs, Association, Signature) :-
 	association_session_type(Association, SessionType),
 	signature_algorithm(SessionType, SHA),
 	hmac_sha(MacKey, TokenContents, Signature, [algorithm(SHA)]),
-	debug(openid(crypt), 'Signed:~n~s~nSignature: ~w', [TokenContents, Signature]).
+	debug(openid(crypt),
+	      'Signed:~n~s~nSignature: ~w', [TokenContents, Signature]).
 
-signature_algorithm('DH-SHA1', sha1).
+signature_algorithm('DH-SHA1',   sha1).
 signature_algorithm('DH-SHA256', sha256).
 
 
@@ -847,28 +1141,62 @@ signature_algorithm('DH-SHA256', sha256).
 		    expires_at,		% time-stamp
 		    mac_key).		% code-list
 
-%%	openid_associate(+URL, -Handle, -Assoc) is det.
-%%	openid_associate(?URL, +Handle, -Assoc) is semidet.
+%%	openid_associate(?URL, ?Handle, ?Assoc) is det.
+%
+%	Calls openid_associate/4 as
+%
+%	    ==
+%	    openid_associate(URL, Handle, Assoc, []).
+%	    ==
+
+openid_associate(URL, Handle, Assoc) :-
+	openid_associate(URL, Handle, Assoc, []).
+
+%%	openid_associate(+URL, -Handle, -Assoc, +Options) is det.
+%%	openid_associate(?URL, +Handle, -Assoc, +Options) is semidet.
 %
 %	Associate with an open-id server.  We   first  check for a still
 %	valid old association. If there is  none   or  it is expired, we
-%	esstablish one and remember it.
+%	esstablish one and remember it.  Options:
+%
+%	  * ns(URL)
+%	  One of =http://specs.openid.net/auth/2.0= (default) or
+%	  =http://openid.net/signon/1.1=.
 %
 %	@tbd	Should we store known associations permanently?  Where?
 
-openid_associate(URL, Handle, Assoc) :-
+openid_associate(URL, Handle, Assoc, _Options) :-
+	nonvar(Handle), !,
+	debug(openid(associate),
+	      'OpenID: Lookup association with handle ~q', [Handle]),
+	(   association(URL, Handle, Assoc)
+	->  true
+	;   debug(openid(associate),
+		  'OpenID: no association with handle ~q', [Handle]),
+	    fail
+	).
+openid_associate(URL, Handle, Assoc, _Options) :-
+	must_be(atom, URL),
 	association(URL, Handle, Assoc),
 	association_expires_at(Assoc, Expires),
 	get_time(Now),
 	(   Now < Expires
-	->  debug(openid(associate), '~w: Reusing association', [URL])
+	->  !,
+	    debug(openid(associate),
+		  'OpenID: Reusing association with ~q', [URL])
 	;   retractall(association(URL, Handle, _)),
 	    fail
 	).
-openid_associate(URL, Handle, Assoc) :-
-	ground(URL),
-	associate_data(Data, P, _G, X),
-	http_post(URL, form(Data), Reply, [to(codes)]),
+openid_associate(URL, Handle, Assoc, Options) :-
+	associate_data(Data, P, _G, X, Options),
+	debug(openid(associate), 'OpenID: Associating with ~q', [URL]),
+	setup_call_cleanup(
+	    http_open(URL, In,
+		      [ post(form(Data)),
+			cert_verify_hook(ssl_verify)
+		      ]),
+	    read_stream_to_codes(In, Reply),
+	    close(In)),
 	debug(openid(associate), 'Reply: ~n~s', [Reply]),
 	key_values_data(Pairs, Reply),
 	shared_secret(Pairs, P, X, MacKey),
@@ -894,12 +1222,15 @@ shared_secret(Pairs, _, _, Secret) :-
 shared_secret(Pairs, P, X, Secret) :-
 	memberchk(dh_server_public-Base64Public, Pairs),
 	memberchk(enc_mac_key-Base64EncMacKey, Pairs),
+	memberchk(session_type-SessionType, Pairs),
 	base64_btwoc(ServerPublic, Base64Public),
 	DiffieHellman is powm(ServerPublic, X, P),
 	atom_codes(Base64EncMacKey, Base64EncMacKeyCodes),
 	phrase(base64(EncMacKey), Base64EncMacKeyCodes),
 	btwoc(DiffieHellman, DiffieHellmanBytes),
-	sha_hash(DiffieHellmanBytes, DHHash, [algorithm(sha1)]),
+	signature_algorithm(SessionType, SHA_Algo),
+	sha_hash(DiffieHellmanBytes, DHHash,
+		 [encoding(octet), algorithm(SHA_Algo)]),
 	xor_codes(DHHash, EncMacKey, Secret).
 
 
@@ -915,26 +1246,41 @@ expires_at(Pairs, Time) :-
 	Time is integer(Now)+Seconds.
 
 
-%%	associate_data(-Data, -X) is det.
+%%	associate_data(-Data, -P, -G, -X, +Options) is det.
 %
 %	Generate the data to initiate an association using Diffie-Hellman
 %	shared secret key negotiation.
 
-associate_data(Data, P, G, X) :-
+associate_data(Data, P, G, X, Options) :-
 	openid_dh_p(P),
 	openid_dh_g(G),
-	dh_x(P, X),
+	X is 1+random(P-1),			% 1<=X<P-1
 	CP is powm(G, X, P),
 	base64_btwoc(P, P64),
 	base64_btwoc(G, G64),
 	base64_btwoc(CP, CP64),
-	Data = [ 'openid.mode'		     = associate,
-		 'openid.assoc_type'	     = 'HMAC-SHA1',
-		 'openid.session_type'	     = 'DH-SHA1',
+	option(ns(NS), Options, 'http://specs.openid.net/auth/2.0'),
+	(   assoc_type(NS, DefAssocType, DefSessionType)
+	->  true
+	;   domain_error('openid.ns', NS)
+	),
+	option(assoc_type(AssocType), Options, DefAssocType),
+	option(assoc_type(SessionType), Options, DefSessionType),
+	Data = [ 'openid.ns'		     = NS,
+		 'openid.mode'		     = associate,
+		 'openid.assoc_type'	     = AssocType,
+		 'openid.session_type'	     = SessionType,
 		 'openid.dh_modulus'	     = P64,
 		 'openid.dh_gen'	     = G64,
 		 'openid.dh_consumer_public' = CP64
 	       ].
+
+assoc_type('http://specs.openid.net/auth/2.0',
+	   'HMAC-SHA256',
+	   'DH-SHA256').
+assoc_type('http://openid.net/signon/1.1',
+	   'HMAC-SHA1',
+	   'DH-SHA1').
 
 
 		 /*******************************
@@ -951,25 +1297,6 @@ random_bytes(N, [H|T]) :-
 	N2 is N - 1,
 	random_bytes(N2, T).
 random_bytes(_, []).
-
-
-%%	dh_x(+Max, -X)
-%
-%	Generate a random key X where 1<=X<P-1)
-%
-%	@tbd	If we have /dev/urandom, use that.
-
-dh_x(P, X) :-
-	X0 is random(65536),
-	Max is P - 1,
-	dh_x(Max, X0, X).
-
-dh_x(Max, X0, X) :-
-	X1 is X0<<16+random(65536),
-	(   X1 >= Max
-	->  X = X0
-	;   dh_x(Max, X1, X)
-	).
 
 
 		 /*******************************
@@ -1099,8 +1426,8 @@ bytes_to_int([B|T], Int0, Int) :-
 %	@error	length_mismatch(L1, L2) if the two lists do not have equal
 %		length.
 
-xor_codes([], [], []).
-xor_codes([H1|T1], [H2|T2], [H|T]) :-
+xor_codes([], [], []) :- !.
+xor_codes([H1|T1], [H2|T2], [H|T]) :- !,
 	H is H1 xor H2, !,
 	xor_codes(T1, T2, T).
 xor_codes(L1, L2, _) :-

@@ -1,11 +1,9 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@cs.vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2008-2011, University of Amsterdam
+    Copyright (C): 2008-2013, University of Amsterdam
 			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
@@ -56,7 +54,11 @@ two additional modules that acts as plugins:
 
     * library(http/http_header)
     Loading this library causes http_open/3 to support the =POST= method
-    in addition to =GET= and =HEAD=.
+    in addition to =GET=, =HEAD= and =DELETE=.
+
+    * library(http/http_ssl_plugin)
+    Loading this library causes http_open/3 HTTPS connections.  Relevant
+    options for SLL certificate handling are handled to ssl_context/3.
 
 Here is a simple example to fetch a web-page:
 
@@ -104,7 +106,7 @@ resource. See also parse_time/2.
 		     [ authorization(compound),
 		       final_url(-atom),
 		       header(+atom, -atom),
-		       method(oneof([get,head,post])),
+		       method(oneof([delete,get,head,post])),
 		       size(-integer),
 		       status_code(-integer),
 		       timeout(number),
@@ -122,7 +124,7 @@ resource. See also parse_time/2.
 %	Default value for =|User-Agent|=,  can   be  overruled using the
 %	option user_agent(Agent) of http_open/3.
 
-user_agent('SWI-Prolog <http://www.swi-prolog.org>').
+user_agent('SWI-Prolog').
 
 %%	http_open(+URL, -Stream, +Options) is det.
 %
@@ -153,7 +155,8 @@ user_agent('SWI-Prolog <http://www.swi-prolog.org>').
 %	  AtomValue is unified to the empty atom ('').
 %
 %	  * method(+Method)
-%	  One of =get= (default) or =head=.   The  =head= message can be
+%	  One of =get= (default), =head= or =delete=.
+%	  The  =head= message can be
 %	  used in combination with  the   header(Name,  Value) option to
 %	  access information on the resource   without actually fetching
 %	  the resource itself.  The  returned   stream  must  be  closed
@@ -220,6 +223,8 @@ user_agent('SWI-Prolog <http://www.swi-prolog.org>').
 %		==
 %
 %	@error existence_error(url, Id)
+%	@see ssl_context/3 for SSL related options if
+%	library(http/http_ssl_plugin) is loaded.
 
 http_open(URL, Stream, QOptions) :-
 	meta_options(is_meta, QOptions, Options),
@@ -344,6 +349,7 @@ method(Options, MNAME) :-
 	;   domain_error(method, M)
 	).
 
+map_method(delete, 'DELETE').
 map_method(get,  'GET').
 map_method(head, 'HEAD').
 map_method(post, 'POST') :-
@@ -373,7 +379,7 @@ x_header(_, _).
 auth_header(basic(User, Password), Header, Out) :- !,
 	format(codes(Codes), '~w:~w', [User, Password]),
 	phrase(base64(Codes), Base64Codes),
-	format(Out, '~w: basic ~s\r\n', [Header, Base64Codes]).
+	format(Out, '~w: Basic ~s\r\n', [Header, Base64Codes]).
 auth_header(Auth, _, _) :-
 	domain_error(authorization, Auth).
 
@@ -468,6 +474,7 @@ redirect_options(Options0, Options) :-
 	;   Options = Options1
 	).
 
+redirect_method(delete).
 redirect_method(get).
 redirect_method(head).
 
@@ -524,9 +531,8 @@ return_size(_, _).
 
 return_fields([], _).
 return_fields([header(Name, Value)|T], Lines) :- !,
-	atom_codes(Name, Codes),
 	(   member(Line, Lines),
-	    phrase(atom_field(Codes, Value), Line)
+	    phrase(atom_field(Name, Value), Line)
 	->  true
 	;   Value = ''
 	),
@@ -573,7 +579,7 @@ transfer_encoding(Lines, Encoding) :-
 	Encoding = Encoding0.
 
 transfer_encoding(Encoding) -->
-	field("transfer-encoding"),
+	field('transfer-encoding'),
 	rest(Encoding).
 
 %%	read_header(+In:stream, -Code:int, -Comment:atom, -Lines:list) is det.
@@ -598,7 +604,7 @@ read_header(In, Code, Comment, Lines) :-
 	).
 read_header(_, 500, 'Invalid reply header', []).
 
-rest_header("", _, []) :- !.		% blank line: end of header
+rest_header([], _, []) :- !.		% blank line: end of header
 rest_header(L0, In, [L0|L]) :-
 	read_line_to_codes(In, L1),
 	rest_header(L1, In, L).
@@ -614,7 +620,7 @@ content_length(Lines, Length) :-
 
 location(Lines, RequestURI) :-
 	member(Line, Lines),
-	phrase(atom_field("location", RequestURI), Line), !.
+	phrase(atom_field(location, RequestURI), Line), !.
 
 first_line(Code, Comment) -->
 	"HTTP/", [_], ".", [_],
@@ -628,17 +634,21 @@ atom_field(Name, Value) -->
 	rest(Value).
 
 content_length(Len) -->
-	field("content-length"),
+	field('content-length'),
 	integer(Len).
 
-field([]) -->
+field(Name) -->
+	{ atom_codes(Name, Codes) },
+	field_codes(Codes).
+
+field_codes([]) -->
 	":",
 	skip_blanks.
-field([H|T]) -->
+field_codes([H|T]) -->
 	[C],
 	{ match_header_char(H, C)
 	},
-	field(T).
+	field_codes(T).
 
 match_header_char(C, C) :- !.
 match_header_char(C, U) :-
@@ -722,7 +732,7 @@ check_authorization(basic(User, Password)) :-
 	must_be(atom, User),
 	must_be(atom, Password).
 
-%%	authorization(+URL, -Authorization) is semdet.
+%%	authorization(+URL, -Authorization) is semidet.
 %
 %	True if Authorization must be supplied for URL.
 %
@@ -892,7 +902,7 @@ update_cookies(_, _, _) :-
 	predicate_property(http:update_cookies(_,_,_), number_of_clauses(0)), !.
 update_cookies(Lines, Parts, Options) :-
 	(   member(Line, Lines),
-	    phrase(atom_field("set_cookie", CookieData), Line),
+	    phrase(atom_field('set_cookie', CookieData), Line),
 	    http:update_cookies(CookieData, Parts, Options),
 	    fail
 	;   true
@@ -925,10 +935,18 @@ update_cookies(Lines, Parts, Options) :-
 %	open stream to the HTTP server, Parts is the broken-down request
 %	(see uri_components/2) and Options is the list of options passed
 %	to http_open.  The predicate is called as if using ignore/1.
+%
+%	@see complements http:update_cookies/3.
+%	@see library(http/http_cookies) implements cookie handling on
+%	top of these hooks.
 
-%%	update_cookies(+CookieData, +Parts, +Options) is semidet.
+%%	http:update_cookies(+CookieData, +Parts, +Options) is semidet.
 %
 %	Update the cookie database.  CookieData  is   the  value  of the
 %	=|Set-Cookie|= field, Parts is  the   broken-down  request  (see
 %	uri_components/2) and Options is the list   of options passed to
 %	http_open.
+%
+%	@see complements http:write_cookies
+%	@see library(http/http_cookies) implements cookie handling on
+%	top of these hooks.

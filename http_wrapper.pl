@@ -1,11 +1,10 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@uva.nl
+    E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 1985-2009, University of Amsterdam
+    Copyright (C): 1985-2013, University of Amsterdam
+			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -32,6 +31,7 @@
 :- module(httpd_wrapper,
 	  [ http_wrapper/5,		% :Goal, +In, +Out, -Conn, +Options
 	    http_current_request/1,	% -Request
+	    http_peer/2,		% +Request, -PeerIP
 	    http_send_header/1,		% +Term
 	    http_relative_path/2,	% +AbsPath, -RelPath
 					% Internal API
@@ -44,6 +44,7 @@
 :- use_module(library(lists)).
 :- use_module(library(debug)).
 :- use_module(library(broadcast)).
+:- use_module(library(dcg/basics)).
 
 :- meta_predicate
 	http_wrapper(0, +, +, -, +).
@@ -188,11 +189,13 @@ cgi_finish(CGI, Close, Bytes) :-
 %		find CPU usage, etc.
 
 send_error(Out, State0, Error, Close) :-
-	map_exception_to_http_status(Error, Reply, HdrExtra),
-	catch(http_reply(Reply, Out,
+	map_exception_to_http_status(Error, Reply, HdrExtra, Context),
+	catch(http_reply(Reply,
+                         Out,
 			 [ content_length(CLen)
 			 | HdrExtra
 			 ],
+                         Context,
 			 Code),
 	      E, true),
 	(   var(E)
@@ -200,7 +203,9 @@ send_error(Out, State0, Error, Close) :-
 	;   http_done(500,  E, 0, State0),
 	    throw(E)			% is that wise?
 	),
-	(   memberchk(connection(Close), HdrExtra)
+        (   Error = http_reply(switching_protocols(Goal, SwitchOptions))
+        ->  Close = switch_protocol(Goal, SwitchOptions)
+	;   memberchk(connection(Close), HdrExtra)
 	->  true
 	;   Close = close
 	).
@@ -295,13 +300,41 @@ cgi_hook(header, CGI) :-
 	cgi_set(CGI, transfer_encoding(Transfer)). % must be LAST
 cgi_hook(send_header, CGI) :-
 	cgi_property(CGI, header(Header)),
+	debug(http(cgi), 'Header: ~q', [Header]),
 	cgi_property(CGI, client(Out)),
-	(   cgi_property(CGI, transfer_encoding(chunked))
+	(   redirect(Header, Action, RedirectHeader)
+	->  http_status_reply(Action, Out, RedirectHeader, _),
+	    cgi_discard(CGI)
+	;   cgi_property(CGI, transfer_encoding(chunked))
 	->  http_reply_header(Out, chunked_data, Header)
 	;   cgi_property(CGI, content_length(Len))
 	->  http_reply_header(Out, cgi_data(Len), Header)
 	).
 cgi_hook(close, _).
+
+%%	redirect(+Header, -Action, -RestHeader) is semidet.
+%
+%	Detect the CGI =Location= and =Status= headers for formulating a
+%	HTTP redirect.
+
+redirect(Header, Action, RestHeader) :-
+	memberchk(location(To), Header),
+	delete(Header, location(_), Header1),
+	(   memberchk(status(Line), Header1)
+	->  delete(Header1, status(_), RestHeader),
+	    (	atom_codes(Line, Codes),
+		phrase(integer(Status), Codes, _)
+	    ->  true
+	    ;   Status = 302
+	    )
+	;   RestHeader = Header1,
+	    Status = 302
+	),
+	redirect_action(Status, To, Action).
+
+redirect_action(301, To, moved(To)).
+redirect_action(302, To, moved_temporary(To)).
+redirect_action(303, To, see_other(To)).
 
 
 %%	http_send_header(+Header)
@@ -360,6 +393,25 @@ http_current_request(Request) :-
 	cgi_property(CGI, request(Request)).
 
 
+%%	http_peer(+Request, -PeerIP:atom) is semidet.
+%
+%	True when PeerIP is the IP address   of  the connection peer. If
+%	the connection is established via  a   proxy  that  supports the
+%	=X-Forwarded-For= HTTP header, PeerIP is the   IP address of the
+%	original initiater.
+
+http_peer(Request, IP) :-
+        memberchk(x_forwarded_for(IP0), Request), !,
+	atomic_list_concat(Parts, ', ', IP0),
+	last(Parts, IP).
+http_peer(Request, IP) :-
+        memberchk(peer(Peer), Request), !,
+        peer_to_ip(Peer, IP).
+
+peer_to_ip(ip(A,B,C,D), IP) :-
+        atomic_list_concat([A,B,C,D], '.', IP).
+
+
 %%	http_relative_path(+AbsPath, -RelPath) is det.
 %
 %	Convert an absolute path (without host, fragment or search) into
@@ -405,7 +457,7 @@ debug_request(Code, Status, Id, _, Bytes) :-
 	map_exception(Status, Reply), !,
 	debug(http(request), '[~D] ~w ~w; ~D bytes',
 	      [Id, Code, Reply, Bytes]).
-debug_request(Code, Except, Id, _, _) :- !,
+debug_request(Code, Except, Id, _, _) :-
 	Except = error(_,_), !,
 	message_to_string(Except, Message),
 	debug(http(request), '[~D] ~w ERROR: ~w',

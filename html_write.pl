@@ -1,11 +1,9 @@
-/*  $Id$
-
-    Part of SWI-Prolog
+/*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker and Anjo Anjewierden
-    E-mail:        J.Wielemaker@cs.vu.nl
+    E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 1985-2010, University of Amsterdam
+    Copyright (C): 1985-2013, University of Amsterdam
 			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
@@ -37,6 +35,7 @@
 					% Basic output routines
 	    page//1,			% :Content
 	    page//2,			% :Head, :Body
+	    page//3,			% +Style, :Head, :Body
 	    html//1,			% :Content
 
 					% Option processing
@@ -49,9 +48,11 @@
 	    html_receive//2,		% +Id, :Handler
 	    xhtml_ns//2,		% +Id, +Value
 
+	    html/4,			% <![html[quasi quotations]]>
+
 					% Useful primitives for expanding
 	    html_begin//1,		% +EnvName[(Attribute...)]
-	    html_end//1,			% +EnvName
+	    html_end//1,		% +EnvName
 	    html_quoted//1,		% +Text
 	    html_quoted_attribute//1,	% +Attribute
 
@@ -71,6 +72,9 @@
 :- use_module(library(pairs)).
 :- use_module(library(sgml)).		% Quote output
 :- use_module(library(uri)).
+:- use_module(library(debug)).
+:- use_module(html_quasiquotations).
+
 :- set_prolog_flag(generate_debug_info, false).
 
 :- meta_predicate
@@ -83,6 +87,11 @@
 	pagebody(+, :, -, +),
 	html_receive(+, 3, -, +),
 	html_post(+, :, -, +).
+
+:- multifile
+	expand//1,			% +HTMLElement
+	expand_attribute_value//1.	% +HTMLAttributeValue
+
 
 /** <module> Write HTML text
 
@@ -121,23 +130,26 @@ encoding.
 %%	html_set_options(+Options) is det.
 %
 %	Set options for the HTML output.   Options  are stored in prolog
-%	flags to ensure  with  proper   multi-threaded  behaviour  where
-%	setting an option is local to the   thread and new threads start
-%	with the options from the parent thread.  Defined options are:
+%	flags to ensure proper multi-threaded behaviour where setting an
+%	option is local to the thread  and   new  threads start with the
+%	options from the parent thread. Defined options are:
 %
-%		* dialect(Dialect)
-%		One of =html= (default) or =xhtml=.
+%	  * dialect(Dialect)
+%	    One of =html4=, =xhtml= or =html5= (default). For
+%	    compatibility reasons, =html= is accepted as an
+%	    alias for =html4=.
 %
-%		* doctype(+DocType)
-%		Set the =|<|DOCTYPE|= DocType =|>|= line for page//1 and
-%		page//2.
+%	  * doctype(+DocType)
+%	    Set the =|<|DOCTYPE|= DocType =|>|= line for page//1 and
+%	    page//2.
 %
-%		* content_type(+ContentType)
-%		Set the =|Content-type|= for reply_html_page/3
+%	  * content_type(+ContentType)
+%	    Set the =|Content-type|= for reply_html_page/3
 %
-%	Note  that  the  doctype  is  covered    by  two  prolog  flags:
-%	=html_doctype= for the html dialect  and =xhtml_doctype= for the
-%	xhtml dialect. Dialect muct be switched before doctype.
+%	Note that the doctype and  content_type   flags  are  covered by
+%	distinct  prolog  flags:  =html4_doctype=,  =xhtml_doctype=  and
+%	=html5_doctype= and similar for the   content  type. The Dialect
+%	must be switched before doctype and content type.
 
 html_set_options(Options) :-
 	must_be(list, Options),
@@ -148,24 +160,27 @@ set_options([H|T]) :-
 	html_set_option(H),
 	set_options(T).
 
-html_set_option(dialect(Dialect)) :- !,
-	must_be(oneof([html,xhtml]), Dialect),
+html_set_option(dialect(Dialect0)) :- !,
+	must_be(oneof([html,html4,xhtml,html5]), Dialect0),
+	(   html_version_alias(Dialect0, Dialect)
+	->  true
+	;   Dialect = Dialect0
+	),
 	set_prolog_flag(html_dialect, Dialect).
 html_set_option(doctype(Atom)) :- !,
 	must_be(atom, Atom),
-	(   current_prolog_flag(html_dialect, html)
-	->  set_prolog_flag(html_doctype, Atom)
-	;   set_prolog_flag(xhtml_doctype, Atom)
-	).
+	current_prolog_flag(html_dialect, Dialect),
+	dialect_doctype_flag(Dialect, Flag),
+	set_prolog_flag(Flag, Atom).
 html_set_option(content_type(Atom)) :- !,
 	must_be(atom, Atom),
-	(   current_prolog_flag(html_dialect, html)
-	->  set_prolog_flag(html_content_type, Atom)
-	;   set_prolog_flag(xhtml_content_type, Atom)
-	).
+	current_prolog_flag(html_dialect, Dialect),
+	dialect_content_type_flag(Dialect, Flag),
+	set_prolog_flag(Flag, Atom).
 html_set_option(O) :-
 	domain_error(html_option, O).
 
+html_version_alias(html, html4).
 
 %%	html_current_option(?Option) is nondet.
 %
@@ -174,26 +189,34 @@ html_set_option(O) :-
 html_current_option(dialect(Dialect)) :-
 	current_prolog_flag(html_dialect, Dialect).
 html_current_option(doctype(DocType)) :-
-	(   current_prolog_flag(html_dialect, html)
-	->  current_prolog_flag(html_doctype, DocType)
-	;   current_prolog_flag(xhtml_doctype, DocType)
-	).
+	current_prolog_flag(html_dialect, Dialect),
+	dialect_doctype_flag(Dialect, Flag),
+	current_prolog_flag(Flag, DocType).
 html_current_option(content_type(ContentType)) :-
-	(   current_prolog_flag(html_dialect, html)
-	->  current_prolog_flag(html_content_type, ContentType)
-	;   current_prolog_flag(xhtml_content_type, ContentType)
-	).
+	current_prolog_flag(html_dialect, Dialect),
+	dialect_content_type_flag(Dialect, Flag),
+	current_prolog_flag(Flag, ContentType).
 
+dialect_doctype_flag(html4, html4_doctype).
+dialect_doctype_flag(html5, html5_doctype).
+dialect_doctype_flag(xhtml, xhtml_doctype).
 
-option_default(html_dialect, html).
-option_default(html_doctype,
+dialect_content_type_flag(html4, html4_content_type).
+dialect_content_type_flag(html5, html5_content_type).
+dialect_content_type_flag(xhtml, xhtml_content_type).
+
+option_default(html_dialect, html5).
+option_default(html4_doctype,
 	       'HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" \c
 	       "http://www.w3.org/TR/html4/loose.dtd"').
+option_default(html5_doctype,
+	       'html').
 option_default(xhtml_doctype,
 	       'html PUBLIC "-//W3C//DTD XHTML 1.0 \c
 	       Transitional//EN" \c
 	       "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"').
-option_default(html_content_type, 'text/html; charset=UTF-8').
+option_default(html4_content_type, 'text/html; charset=UTF-8').
+option_default(html5_content_type, 'text/html; charset=UTF-8').
 option_default(xhtml_content_type, 'application/xhtml+xml; charset=UTF-8').
 
 %%	init_options is det.
@@ -273,6 +296,9 @@ content_type -->
 			       content(Type)
 			     ], [])).
 content_type -->
+	{ html_current_option(dialect(html5)) }, !,
+	html_post(head, meta('charset=UTF-8')).
+content_type -->
 	[].
 
 pagehead(_, Head) -->
@@ -323,26 +349,23 @@ hook_module(_, user, PI) :-
 
 html(Spec) -->
 	{ strip_module(Spec, M, T) },
-	html(T, M).
+	qhtml(T, M).
 
-html([], _) --> !,
+qhtml([], _) --> !,
 	[].
-html([H|T], M) --> !,
+qhtml([H|T], M) --> !,
 	html_expand(H, M),
-	html(T, M).
-html(X, M) -->
+	qhtml(T, M).
+qhtml(X, M) -->
 	html_expand(X, M).
 
 html_expand(M:Term, _) --> !,
-	html(Term, M).
+	qhtml(Term, M).
 html_expand(Term, Module) -->
 	do_expand(Term, Module), !.
 html_expand(Term, _Module) -->
 	{ print_message(error, html(expand_failed(Term))) }.
 
-
-:- multifile
-	expand/3.
 
 do_expand(Token, _) -->			% call user hooks
 	expand(Token), !.
@@ -357,7 +380,7 @@ do_expand(\List, Module) -->
 do_expand(\Term, Module, In, Rest) :- !,
 	call(Module:Term, In, Rest).
 do_expand(Module:Term, _) --> !,
-	html(Term, Module).
+	qhtml(Term, Module).
 do_expand(script(Content), _) --> !,	% general CDATA declared content elements?
 	html_begin(script),
 	[ Content
@@ -379,7 +402,7 @@ do_expand(element(Env, Attributes, Contents), M) --> !,
 	    }
 	->  xhtml_empty(Env, Attributes)
 	;   html_begin(Env, Attributes),
-	    html(Contents, M),
+	    qhtml(Contents, M),
 	    html_end(Env)
 	).
 do_expand(Term, M) -->
@@ -393,7 +416,7 @@ do_expand(Term, M) -->
 		}
 	    ->  xhtml_empty(Env, [])
 	    ;	html_begin(Env),
-		html(Contents, M),
+		qhtml(Contents, M),
 		html_end(Env)
 	    )
 	).
@@ -406,14 +429,15 @@ do_expand(Term, M) -->
 	    }
 	->  xhtml_empty(Env, Attributes)
 	;   html_begin(Env, Attributes),
-	    html(Contents, M),
+	    qhtml(Contents, M),
 	    html_end(Env)
 	).
 
 check_non_empty([], _, _) :- !.
 check_non_empty(_, Tag, Term) :-
 	layout(Tag, _, empty), !,
-	print_message(warning, format('Using empty element with content: ~p', [Term])).
+	print_message(warning,
+		      format('Using empty element with content: ~p', [Term])).
 check_non_empty(_, _, _).
 
 %%	raw(+List, +Modules)// is det.
@@ -638,7 +662,7 @@ search_parameters([H|T]) -->
 	search_parameter(H),
 	(   {T == []}
 	->  []
-	;   [&],
+	;   ['&amp;'],
 	    search_parameters(T)
 	).
 
@@ -720,7 +744,7 @@ html_quoted_attribute(Text) -->
 
 %%	html_post(+Id, :HTML)// is det.
 %
-%	Reposition HTML to  the  receiving   Id.  The  http_post//2 call
+%	Reposition HTML to  the  receiving   Id.  The  html_post//2 call
 %	processes HTML using html//1. Embedded   \-commands are executed
 %	by mailman/1 from  print_html/1   or  html_print_length/2. These
 %	commands are called in the calling   context of the html_post//2
@@ -798,7 +822,11 @@ html_noreceive(Id) -->
 %%	mailman(+Tokens) is det.
 %
 %	Collect  posted  tokens  and  copy    them  into  the  receiving
-%	mailboxes.
+%	mailboxes. Mailboxes may produce output for  each other, but not
+%	cyclic. The current scheme to resolve   this is rather naive: It
+%	simply permutates the mailbox resolution order  until it found a
+%	working one. Before that, it puts   =head= and =script= boxes at
+%	the end.
 
 mailman(Tokens) :-
 	memberchk(mailbox(_, accept(_, Accepted)), Tokens),
@@ -806,8 +834,24 @@ mailman(Tokens) :-
 	mailboxes(Tokens, Boxes),
 	keysort(Boxes, Keyed),
 	group_pairs_by_key(Keyed, PerKey),
-	maplist(mail_id, PerKey).
+	move_last(PerKey, script, PerKey1),
+	move_last(PerKey1, head, PerKey2),
+	(   permutation(PerKey2, PerKeyPerm),
+	    (	mail_ids(PerKeyPerm)
+	    ->	!
+	    ;	debug(html(mailman),
+		      'Failed mail delivery order; retrying', []),
+		fail
+	    )
+	->  true
+	;   print_message(error, html(cyclic_mailboxes))
+	).
 mailman(_).
+
+move_last(Box0, Id, Box) :-
+	selectchk(Id-List, Box0, Box1), !,
+	append(Box1, [Id-List], Box).
+move_last(Box, _, Box).
 
 mailboxes([], []).
 mailboxes([mailbox(Id, Value)|T0], [Id-Value|T]) :- !,
@@ -815,17 +859,44 @@ mailboxes([mailbox(Id, Value)|T0], [Id-Value|T]) :- !,
 mailboxes([_|T0], T) :-
 	mailboxes(T0, T).
 
-mail_id(Id-List) :-
+mail_ids([]).
+mail_ids([H|T0]) :-
+	mail_id(H, NewPosts),
+	add_new_posts(NewPosts, T0, T),
+	mail_ids(T).
+
+mail_id(Id-List, NewPosts) :-
 	mail_handlers(List, Boxes, Content),
 	(   Boxes = [accept(MH:Handler, In)]
 	->  extend_args(Handler, Content, Goal),
-	    phrase(MH:Goal, In)
+	    phrase(MH:Goal, In),
+	    mailboxes(In, NewBoxes),
+	    keysort(NewBoxes, Keyed),
+	    group_pairs_by_key(Keyed, NewPosts)
 	;   Boxes = [ignore(_, _)|_]
-	->  true
+	->  NewPosts = []
 	;   Boxes = [accept(_,_),accept(_,_)|_]
-	->  print_message(error, html(multiple_receivers(Id)))
-	;   print_message(error, html(no_receiver(Id)))
+	->  print_message(error, html(multiple_receivers(Id))),
+	    NewPosts = []
+	;   print_message(error, html(no_receiver(Id))),
+	    NewPosts = []
 	).
+
+add_new_posts([], T, T).
+add_new_posts([Id-Posts|NewT], T0, T) :-
+	(   select(Id-List0, T0, Id-List, T1)
+	->  append(List0, Posts, List)
+	;   debug(html(mailman), 'Stuck with new posts on ~q', [Id]),
+	    fail
+	),
+	add_new_posts(NewT, T1, T).
+
+
+%%	mail_handlers(+Boxes, -Handlers, -Posters) is det.
+%
+%	Collect all post(Module,HTML) into Posters  and the remainder in
+%	Handlers.  Handlers  consists  of  accept(Handler,  Tokens)  and
+%	ignore(_,_).
 
 mail_handlers([], [], []).
 mail_handlers([post(Module,HTML)|T0], H, [Module:HTML|T]) :- !,
@@ -857,7 +928,7 @@ sorted_html(List) -->
 %	a user hook  html_write:html_head_expansion/2   to  process  the
 %	collected head material into a term suitable for html//1.
 %
-%	@tbd  This  has  been  added    to   facilate  html_head.pl,  an
+%	@tbd  This  has  been  added   to  facilitate  html_head.pl,  an
 %	experimental  library  for  dealing  with   css  and  javascript
 %	resources. It feels a bit like a hack, but for now I do not know
 %	a better solution.
@@ -959,6 +1030,8 @@ layout(h1,	   2-0,	0-2).
 layout(h2,	   2-0,	0-2).
 layout(h3,	   2-0,	0-2).
 layout(h4,	   2-0,	0-2).
+
+layout(iframe,	   1-1, 1-1).
 
 layout(hr,	   1-1, empty).		% empty elements
 layout(br,	   0-1, empty).
@@ -1208,7 +1281,7 @@ prolog_colour:goal_colours(Goal, Colours) :-
 					% TBD: Check with do_expand!
 html_colours(Var, classify) :-
 	var(Var), !.
-html_colours(\List, built_in-Colours) :-
+html_colours(\List, built_in-[built_in-Colours]) :-
 	is_list(List), !,
 	list_colours(List, Colours).
 html_colours(\_, built_in-[dcg]) :- !.

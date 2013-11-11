@@ -1,9 +1,10 @@
 /*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@uva.nl
+    E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (C): 2009, University of Amsterdam
+    Copyright (C): 2009-2013, University of Amsterdam
+			      VU University Amsterdam
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -35,14 +36,12 @@
 :- use_module(library(http/mimetype)).
 :- use_module(library(http/http_path)).
 :- use_module(library(error)).
-:- use_module(library(settings)).
 :- use_module(library(lists)).
 :- use_module(library(occurs)).
 :- use_module(library(option)).
 :- use_module(library(ordsets)).
 :- use_module(library(assoc)).
 :- use_module(library(ugraphs)).
-:- use_module(library(broadcast)).
 :- use_module(library(apply)).
 :- use_module(library(debug)).
 
@@ -67,7 +66,7 @@ html_include//1.
 For usage in HTML generation,  there   is  the DCG rule html_requires//1
 that demands named resources  in  the   HTML  head.
 
----++ About resource ordering
+## About resource ordering {#html-resource-ordering}
 
 All calls to html_requires//1 for the page are collected and duplicates
 are removed.  Next, the following steps are taken:
@@ -81,13 +80,13 @@ are removed.  Next, the following steps are taken:
        that if the order matters the dependency list must be split
        and only the primary dependency must be added.
 
----++ Debugging dependencies
+## Debugging dependencies {#html-resource-debugging}
 
 Use ?- debug(html(script)). to  see  the   requested  and  final  set of
 resources. All declared resources  are   in  html_resource/3. The edit/1
 command recognises the names of HTML resources.
 
----++ Predicates
+## Predicates {#html-resource-predicates}
 
 @tbd	Possibly we should add img//2 to include images from symbolic
 	path notation.
@@ -118,9 +117,26 @@ command recognises the names of HTML resources.
 %		but only its dependencies.  This allows for defining an
 %		alias for one or more resources.
 %
+%		* ordered(+Bool)
+%		Defines that the list of requirements is ordered, which
+%		means that each requirement in the list depends on its
+%		predecessor.
+%
 %		* aggregate(+List)
 %		States that About is an aggregate of the resources in
-%		List.
+%		List. This means that if both About and one of the
+%		elements of List appears in the dependencies, About
+%		is kept and the smaller one is dropped. If there are a
+%		number of dependencies on the small members, these are
+%		replaced with dependency on the big (aggregate) one,
+%		for example, to specify that a big javascript is
+%		actually the composition of a number of smaller ones.
+%
+%		* mime_type(-Mime)
+%		May be specified for non-virtual resources to specify
+%		the mime-type of the resource.  By default, the mime
+%		type is derived from the file name using
+%		file_mime_type/2.
 %
 %	Registering the same About multiple times extends the properties
 %	defined  for  About.  In  particular,  this  allows  for  adding
@@ -199,14 +215,17 @@ requirements(Required, Paths) :-
 	phrase(requires(Required), List),
 	sort(List, Paths0),		% remove duplicates
 	use_agregates(Paths0, Paths1, AggregatedBy),
-	order_html_resources(Paths1, AggregatedBy, Paths).
+	order_html_resources(Paths1, AggregatedBy, Paths2),
+	exclude(virtual, Paths2, Paths).
+
+virtual('V'(_)).
 
 %%	use_agregates(+Paths, -Aggregated, -AggregatedBy) is det.
 %
 %	Try to replace sets of  resources   by  an  `aggregate', a large
 %	javascript or css file that  combines   the  content of multiple
 %	small  ones  to  reduce  the  number   of  files  that  must  be
-%	transferred to the server. The current rule says that aggregates
+%	transferred to the client. The current rule says that aggregates
 %	are used if at least half of the members are used.
 
 use_agregates(Paths, Aggregated, AggregatedBy) :-
@@ -288,16 +307,19 @@ requires([H|T], Base) --> !,
 	requires(H, Base),
 	requires(T, Base).
 requires(Spec, Base) -->
-	requires(Spec, Base, true).
+	requires(Spec, Base, _, true).
 
-requires(Spec, Base, Virtual) -->
+requires('V'(Spec), Base, Properties, Virtual) -->
+	{ nonvar(Spec) }, !,
+	requires(Spec, Base, Properties, Virtual).
+requires(Spec, Base, Properties, Virtual) -->
 	{ res_properties(Spec, Properties),
 	  http_absolute_location(Spec, File, [relative_to(Base)])
 	},
 	(   { option(virtual(true), Properties)
 	    ; Virtual == false
 	    }
-	->  []
+	->  ['V'(Spec)]
 	;   [File]
 	),
 	requires_from_properties(Properties, File).
@@ -346,7 +368,10 @@ prerequisites([R|T], AggregatedBy, Vs, Vt) -->
 	prerequisites(T, AggregatedBy, Vt0, Vt).
 
 prerequisites_for(R, AggregatedBy, Vs, Vt) -->
-	{ phrase(requires(R, /, false), Req) },
+	{ phrase(requires(R, /, Properties, true), Req0),
+	  delete(Req0, R, Req)
+	},
+	prop_edges(Properties),
 	(   {Req == []}
 	->  {Vs = [R|Vt]}
 	;   req_edges(Req, AggregatedBy, R),
@@ -361,6 +386,40 @@ req_edges([H|T], AggregatedBy, R) -->
 	;   [H-R]
 	),
 	req_edges(T, AggregatedBy, R).
+
+%%	prop_edges(+Properties)//
+%
+%	Subscribes a list of dependencies   from  resources that declare
+%	their requirements with ordered(true).
+
+prop_edges(Properties) -->
+	{ option(ordered(true), Properties) }, !,
+	ordered_reqs(Properties).
+prop_edges(_) --> [].
+
+ordered_reqs([]) --> [].
+ordered_reqs([H|T]) --> ordered_req(H), ordered_reqs(T).
+
+ordered_req(requires([H|T])) -->
+	{ T \== [], !,
+	  absolute_req(H, File)
+	},
+	order_pairs(T, File).
+ordered_req(_) --> [].
+
+order_pairs([H|T], P) --> !,
+	{ absolute_req(H, File)
+	},
+	[ P-File ],
+	order_pairs(T, File).
+order_pairs(_, _) --> [].
+
+absolute_req(Virtual, Abs) :-
+	html_resource(Virtual, _, Properties),
+	option(virtual(true), Properties), !,
+	Abs = 'V'(Virtual).
+absolute_req(Spec, Abs) :-
+	http_absolute_location(Spec, Abs, [relative_to(/)]).
 
 
 %%	connect_graph(+Graph, -Start, -Connected) is det.
@@ -471,6 +530,10 @@ html_include([H|T]) --> !,
 	html_include(H),
 	html_include(T).
 html_include(Path) -->
+	{ res_property(Path, mime_type(Mime))
+	}, !,
+	html_include(Mime, Path).
+html_include(Path) -->
 	{ file_mime_type(Path, Mime) }, !,
 	html_include(Mime, Path).
 
@@ -493,15 +556,22 @@ html_include(Mime, Path) -->
 		 *******************************/
 
 :- multifile
-	user:message_hook/3.
+	user:message_hook/3,
+	prolog:message//1.
 :- dynamic
 	user:message_hook/3.
 
-user:message_hook(make(done(Reload)), _Level, _Lines) :-
-	Reload \== [],
+user:message_hook(load_file(done(_Nesting, _File, _Action,
+				 _Module, _Time, _Clauses)),
+		  _Level, _Lines) :-
 	clean_same_about_cache,
 	clean_aggregate_cache,
 	fail.
+
+prolog:message(html_include(dont_know, Mime, Path)) -->
+	[ 'Don\'t know how to include resource ~q (mime-type ~q)'-
+	  [Path, Mime]
+	].
 
 
 		 /*******************************
