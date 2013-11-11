@@ -76,21 +76,8 @@ check::
 TEXEXTRA=	post.tex json.tex httplog.tex httppath.tex htmlhead.tex \
 		httpsession.tex httpdispatch.tex httpdirindex.tex httppwp.tex \
 		httpopen.tex httphost.tex httpopenid.tex jswrite.tex \
-<<<<<<< HEAD
-		httpfiles.tex
-$(TEX):		$(TEXEXTRA) figs/httpserver.eps figs/httpserver.pd
-
-figs/httpserver.eps:
-		mkdir -p figs
-		cp $(srcdir)/figs/httpserver.eps figs
-
-figs/httpserver.pd:
-		mkdir -p figs
-		cp $(srcdir)/figs/httpserver.pd figs
-=======
 		httpfiles.tex httpcors.tex mimepack.tex httpunixdaemon.tex
 $(TEX):		$(TEXEXTRA)
->>>>>>> 8e1667b73182fdc0b6ece508b9b93f8fc894694f
 
 json.tex:	$(srcdir)/json.pl $(srcdir)/json_convert.pl $(srcdir)/http_json.pl
 
@@ -130,20 +117,14 @@ httpdirindex.tex: $(srcdir)/http_dirindex.pl
 httppwp.tex:	$(srcdir)/http_pwp.pl
 		$(PLTOTEX) --subsection 'library(http/http_pwp)'
 
-<<<<<<< HEAD
+httpunixdaemon.tex:	$(srcdir)/http_unix_daemon.pl
+		$(PLTOTEX) --subsubsection 'library(http/http_unix_daemon)'
+
 jswrite.tex:	$(srcdir)/js_write.pl
 		$(PLTOTEX) --subsection 'library(http/js_write)'
 
-=======
-httpunixdaemon.tex:	http_unix_daemon.pl
-		$(PLTOTEX) --subsubsection 'library(http/http_unix_daemon)'
-
-jswrite.tex:	js_write.pl
-		$(PLTOTEX) --subsection 'library(http/js_write)'
-
-mimepack.tex:	mimepack.pl
+mimepack.tex:	$(srcdir)/mimepack.pl
 		$(PLTOTEX) --subsection 'library(http/mimepack)'
->>>>>>> 8e1667b73182fdc0b6ece508b9b93f8fc894694f
 
 ################################################################
 # Clean
