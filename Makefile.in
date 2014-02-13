@@ -29,7 +29,7 @@ json.@SO@:	$(JSONOBJ)
 
 http_stream.o:	$(srcdir)/http_error.c $(srcdir)/http_chunked.c $(srcdir)/cgi_stream.c $(srcdir)/stream_range.c
 
-install:	$(LIBSRCPL) $(SOLIBS)
+install:	$(LIBSRCPL) $(SOLIBS)  install-examples
 		mkdir -p $(DESTDIR)$(SOLIBDIR)
 		for f in $(SOLIBS); do \
                   $(INSTALL_PROGRAM) $$f $(DESTDIR)$(SOLIBDIR); \
