@@ -32,6 +32,7 @@
 	    ax_form_attributes/2	% +Form, -Values
 	  ]).
 :- use_module(library(error)).
+:- use_module(library(lists)).
 
 
 /** <module> Attribute Exchange library

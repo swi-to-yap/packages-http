@@ -31,6 +31,7 @@
 	  [ js_token//1,
 	    js_program//1
 	  ]).
+:- use_module(library(lists)).
 :- use_module(library(record)).
 :- use_module(library(dcg/basics)).
 :- use_module(library(pure_input)).	% syntax_error//1

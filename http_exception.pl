@@ -36,6 +36,8 @@
 @see	http_header.pl, http_wrapper.pl
 */
 
+:- use_module(library(lists)).
+
 %%	map_exception_to_http_status(+Exception, -Reply, -HdrExtra, -Context)
 %
 %	Map certain defined  exceptions  to   special  reply  codes. The

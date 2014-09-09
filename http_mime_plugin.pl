@@ -35,6 +35,7 @@
 :- use_module(library(memfile)).
 :- use_module(library(mime)).
 :- use_module(library(option)).
+:- use_module(library(lists)).
 
 :- initialization
 	mime_default_charset(_, 'UTF-8').

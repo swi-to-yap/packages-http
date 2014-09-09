@@ -30,6 +30,7 @@
 :- module(http_server_files,
 	  [ serve_files_in_directory/2	% +Alias, +HTTPRequest
 	  ]).
+:- use_module(library(lists)).
 :- use_module(library(http/http_path)).
 :- use_module(library(http/http_dispatch)).
 

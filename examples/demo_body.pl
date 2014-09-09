@@ -41,6 +41,8 @@
 :- use_module(library(pce)).
 :- endif.
 
+:- use_module(library(lists)).
+
 :- style_check(-atom).			% allow long atoms
 :- discontiguous
 	reply/1.

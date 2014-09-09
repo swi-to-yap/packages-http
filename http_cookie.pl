@@ -33,6 +33,7 @@
 	    cookie_current_cookie/4	% ?ClientId, ?Name, ?Value, ?Options
 	  ]).
 :- use_module(library(http/http_header)).
+:- use_module(library(lists)).
 :- use_module(library(option)).
 :- use_module(library(debug)).
 
