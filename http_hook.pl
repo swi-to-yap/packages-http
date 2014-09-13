@@ -31,6 +31,7 @@
 	  []).
 
 /** <module> HTTP library hooks
+@ingroup http
 
 Get the declarations of the HTTP package using
 

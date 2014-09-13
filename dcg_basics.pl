@@ -31,6 +31,7 @@
 :- reexport(library(dcg/basics)).
 
 /** <module> DCG basics
+@ingroup http
 
 @deprecated	The DCG basics library has been moved to library(dcg_bacis).
 		This stub loads and reexports the new library.  Please update

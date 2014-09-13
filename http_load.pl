@@ -35,6 +35,7 @@
 	user:prolog_load_file/2.
 
 /** <module> Load Prolog code from a web server
+@ingroup http
 
 This module provides a hook into load_files/2 that allows loading Prolog
 code from HTTP and HTTPS servers.  Below is an example session:

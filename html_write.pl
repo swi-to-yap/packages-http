@@ -94,6 +94,7 @@
 
 
 /** <module> Write HTML text
+@ingroup http
 
 The purpose of this library  is  to   simplify  writing  HTML  pages. Of
 course, it is possible to  use  format/3   to  write  to the HTML stream

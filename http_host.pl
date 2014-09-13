@@ -47,6 +47,7 @@
 :- predicate_options(http_current_host/4, 4, [global(boolean)]).
 
 /** <module> Obtain public server location
+@ingroup http
 
 This library finds the public address of the running server. This can be
 used to construct URLs that are visible   from anywhere on the internet.

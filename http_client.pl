@@ -78,6 +78,7 @@
 
 
 /** <module> HTTP client library
+@ingroup http
 
 This library provides the four basic   HTTP client actions: GET, DELETE,
 POST and PUT. In addition, it   provides http_read_data/3, which is used

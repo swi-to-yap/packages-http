@@ -33,6 +33,7 @@
 	  ]).
 
 /** <module> Determine mime-type for a file
+@ingroup http
 
 Simple library to guess the mime-type from   the extension of a file. As
 various applications need  to  do  this   type  ofinferencing  it  seems

@@ -33,6 +33,7 @@
 	  [
 	  ]).
 :- use_module(library(prolog_stack)).
+@ingroup http
 
 /** <module> Decorate uncaught HTTP exceptions with stack-trace
 

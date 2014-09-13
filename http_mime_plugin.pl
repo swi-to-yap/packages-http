@@ -41,6 +41,7 @@
 	mime_default_charset(_, 'UTF-8').
 
 /** <module> MIME client plugin
+@ingroup http
 
 This plugin for library(http_client)   automatically translates messages
 with content-type =|multipart/form-data|= into a list   of  Name = Value

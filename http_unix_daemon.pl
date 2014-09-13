@@ -17,6 +17,7 @@
 	http_server_hook/1.			% +Options
 
 /** <module> Run SWI-Prolog HTTP server as a Unix system daemon
+@ingroup http
 
 This module provides the logic that  is   needed  to integrate a process
 into the Unix service (daemon) architecture. It deals with the following

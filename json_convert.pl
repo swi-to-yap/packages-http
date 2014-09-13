@@ -50,6 +50,7 @@
 	prolog_bool_to_json/2.		% +In, -Boolean
 
 /** <module> Convert between JSON terms and Prolog application terms
+@ingroup http
 
 The idea behind this module is to  provide a flexible high-level mapping
 between Prolog terms as you would like   to see them in your application

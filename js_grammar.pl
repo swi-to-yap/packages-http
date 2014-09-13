@@ -38,6 +38,7 @@
 :- set_prolog_flag(double_quotes, codes).
 
 /** <module> JavaScript grammar
+@ingroup http
 
 This file provides a complete grammar  for JavaScript (EcmaScript). This
 code supports the  quasi  quotation   syntax  =javascript=,  defined  in

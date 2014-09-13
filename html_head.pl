@@ -47,6 +47,7 @@
 
 
 /** <module> Automatic inclusion of CSS and scripts links
+@ingroup http
 
 This library allows for  abstract  declaration   of  available  CSS  and
 Javascript resources and their dependencies using html_resource/2. Based

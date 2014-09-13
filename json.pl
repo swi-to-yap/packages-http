@@ -73,6 +73,7 @@
 		     ]).
 
 /** <module> Reading and writing JSON serialization
+@ingroup http
 
 This module supports reading and writing JSON objects. The canonical
 Prolog representation for a JSON value is defined as:

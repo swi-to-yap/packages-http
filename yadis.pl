@@ -37,6 +37,7 @@
 :- use_module(library(sgml)).
 
 /** <module> Yadis discovery
+@ingroup http
 
 @see http://en.wikipedia.org/wiki/Yadis
 */

@@ -39,6 +39,7 @@
 	   'File in which to log HTTP requests').
 
 /** <module> HTTP Logging module
+@ingroup http
 
 Simple module for logging HTTP requests to a file. Logging is enabled by
 loading this file and ensure the setting   http:logfile is not the empty

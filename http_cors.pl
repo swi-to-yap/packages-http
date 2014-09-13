@@ -37,6 +37,7 @@
 	   'Enable CORS for the listed domains.  Use [*] for all domains').
 
 /** <module> Enable CORS: Cross-Origin Resource Sharing
+@ingroup http
 
 This small module allows  for   enabling  Cross-Origin  Resource Sharing
 (CORS) for a specific  request.  Typically,   CORS  is  enabled  for API

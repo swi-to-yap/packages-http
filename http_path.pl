@@ -48,6 +48,7 @@
 :- predicate_options(http_absolute_location/3, 3, [relative_to(atom)]).
 
 /** <module> Abstract specification of HTTP server locations
+@ingroup http
 
 This module provides an abstract specification  of HTTP server locations
 that is inspired on absolute_file_name/3. The   specification is done by

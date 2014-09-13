@@ -64,6 +64,7 @@
 :- predicate_options(http_switch_protocol/2, 2, []).
 
 /** <module> Dispatch requests in the HTTP server
+@ingroup http
 
 This module can be placed between   http_wrapper.pl  and the application
 code to associate HTTP _locations_ to   predicates that serve the pages.

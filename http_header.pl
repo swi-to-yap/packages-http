@@ -78,6 +78,7 @@
 
 
 /** <module> Handling HTTP headers
+@ingroup http
 
 The library library(http/http_header) provides   primitives  for parsing
 and composing HTTP headers. Its functionality  is normally hidden by the

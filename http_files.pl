@@ -39,6 +39,7 @@
 :- predicate_options(http_reply_from_files/3, 2, [indexes(list(atom))]).
 
 /** <module> Serve plain files from a hierarchy
+@ingroup http
 
 Although the SWI-Prolog web-server is intended   to serve documents that
 needed to be computed dynamically,  serving   plain  files  is sometimes

@@ -59,6 +59,7 @@
 :- predicate_options(http_open_session/2, 2, [renew(boolean)]).
 
 /** <module> HTTP Session management
+@ingroup http
 
 This library defines session management based   on HTTP cookies. Session
 management is enabled simply by  loading   this  module.  Details can be

@@ -32,6 +32,7 @@
 	  ]).
 
 /** <module> Internal module of the HTTP server
+@ingroup http
 
 @see	http_header.pl, http_wrapper.pl
 */

@@ -63,6 +63,7 @@
 
 
 /** <module> HTTP JSON Plugin module
+@ingroup http
 
 This  module  inserts  the  JSON  parser  for  documents  of  MIME  type
 =|application/jsonrequest|= and =|application/json|=   requested through

@@ -38,6 +38,7 @@
 :- use_module(library(debug)).
 
 /** <module> HTTP client cookie handling
+@ingroup http
 
 This module implements the cookie hooks  called from http_open/3, adding
 cookie handling to the client.

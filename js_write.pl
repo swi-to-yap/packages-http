@@ -57,6 +57,7 @@
 :- quasi_quotation_syntax(javascript).
 
 /** <module> Utilities for including JavaScript
+@ingroup http
 
 This library is a supplement   to library(http/html_write) for producing
 JavaScript fragments. Its main role is  to   be  able to call JavaScript

@@ -49,6 +49,7 @@
 :- meta_predicate(cgi_open(+,-,2,+)).
 
 /** <module> HTTP Streams
+@ingroup http
 
 This module realises  encoding  and   decoding  filters,  implemented as
 Prolog streams that read/write to an  underlying stream. This allows for

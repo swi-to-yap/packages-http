@@ -36,6 +36,7 @@
 :- use_module(library(quasi_quotations)).
 
 /** <module> HTML quasi quotations
+@ingroup http
 
 This  module  implements  quasi  quotations   for  HTML.  Together  with
 library(http/html_write),  this  allows  for  inclusion   of  long  HTML

@@ -45,6 +45,7 @@
 		     ]).
 
 /** <module> HTTP directory listings
+@ingroup http
 
 This module provides a simple API to   generate  an index for a physical
 directory. The index can be customised   by  overruling the dirindex.css

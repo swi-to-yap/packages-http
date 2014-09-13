@@ -42,6 +42,7 @@
 :- use_module(library(debug)).
 
 /**	<module> Authenticate HTTP connections using 401 headers
+@ingroup http
 
 This module provides the basics  to   validate  an  HTTP =Authorization=
 error. User and  password  information  are   read  from  a  Unix/Apache

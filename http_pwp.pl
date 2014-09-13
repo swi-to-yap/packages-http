@@ -56,6 +56,7 @@
 		     ]).
 
 /** <module> Serve PWP pages through the HTTP server
+@ingroup http
 
 This  module  provides  convience  predicates  to  include  PWP  (Prolog
 Well-formed Pages) in a Prolog  web-server.   It  provides the following

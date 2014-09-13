@@ -35,6 +35,7 @@
 :- use_module(library(http/http_dispatch)).
 
 /** <module> Serve files needed by modules from the server
+@ingroup http
 
 This module provides an infrastructure   for serving resource-files such
 as icons, JavaScript, CSS files, etc.   The default configuration serves

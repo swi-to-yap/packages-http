@@ -43,6 +43,7 @@
 :- use_module(library(debug)).
 
 /** <module> Simple HTTP client
+@ingroup http
 
 This library provides a light-weight HTTP client library to get the data
 from a URL. The functionality of the  library can be extended by loading

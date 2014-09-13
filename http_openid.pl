@@ -94,6 +94,7 @@
 		     ]).
 
 /** <module> OpenID consumer and server library
+@ingroup http
 
 This library implements the OpenID protocol (http://openid.net/). OpenID
 is a protocol to share identities on   the  network. The protocol itself

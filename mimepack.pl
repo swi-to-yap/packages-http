@@ -37,6 +37,7 @@
 :- use_module(library(error)).
 
 /** <module> Create a MIME message
+@ingroup http
 
 Simple and partial implementation of MIME   encoding. MIME is covered by
 RFC 2045. This library is used by  e.g., http_post_data/3 when using the
