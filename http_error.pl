@@ -33,9 +33,10 @@
 	  [
 	  ]).
 :- use_module(library(prolog_stack)).
-@ingroup http
 
-/** <module> Decorate uncaught HTTP exceptions with stack-trace
+/** @ingroup http
+
+<module> Decorate uncaught HTTP exceptions with stack-trace
 
 This module decorates uncaught exceptions of the   user code with a full
 stack-trace. It is based  on  a   hook  introduced  in SWI-Prolog 5.6.5.
