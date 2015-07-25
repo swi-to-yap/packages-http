@@ -414,6 +414,10 @@ guarded_send_rec_header(StreamPair, Stream, Host, RequestURI, Parts, Options) :-
 	method(Options, MNAME),
 	http_version(Version),
 	option(connection(Connection), Options, close),
+	debug(http(request), '~w ~w HTTP/~w', [MNAME, RequestURI, Version]),
+	debug(http(request), 'Host: ~w', [Host]),
+	debug(http(request), 'User-Agent: ~w', [Agent]),
+	debug(http(request), 'Connection: ~w', [Connection]),
 	format(StreamPair,
 	       '~w ~w HTTP/~w\r\n\c
 	       Host: ~w\r\n\c
