@@ -247,8 +247,10 @@ user_agent('SWI-Prolog').
 %	@param	URL is either an atom (url) or a list of _parts_.
 %		If this list is provided, it may contain the fields
 %		=scheme=, =user=, =password=, =host=, =port=, =path= and
-%		=search= (where the argument of the latter is a list of
-%		Name(Value) or Name=Value).  Only =host= is mandatory.
+%		=query_string= (whose argument is an atom) or =search=
+%               (whose argument is a list of `Name(Value)` or `Name=Value`
+%               compound terms).
+%               Only =host= is mandatory.
 %		The following example below opens the URL
 %		=|http://www.example.com/my/path?q=Hello%20World&lang=en|=.
 %		Note that values must *not* be quoted because the
